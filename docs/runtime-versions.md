@@ -21,3 +21,11 @@
 - `public/licenses/SPINE-RUNTIMES-LICENSE.txt` 是 4.2.120 官方 npm 包 `LICENSE` 的未改写副本（SHA-256 `435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e`）；4.0.31 与 4.1.56 自身的官方 LICENSE 也随各自 npm 包进入依赖树。
 
 运行 `npm run verify-runtime-assets` 会校验版本、package-lock 完整性、vendored 哈希、许可副本，以及一次不落盘的 Vite 构建中四个动态 chunk 的实际模块来源和 core 隔离。
+
+对 4.x，验证脚本还会要求 lockfile 的 `resolved` 精确等于表中的官方 registry tarball URL，并要求完整 SRI 分别为：
+
+- 4.0.31：`sha512-G6j31+caQJck/4UN8TVaTKnU0RPysI7ECMkCxcXBGsTmv98m0O5Wx18YgeIf//Bg8KAO+mZ/DmwzeScwGG9HPA==`
+- 4.1.56：`sha512-LNr/X4B81/rC96mzFV+L5LPnqaIj1v3RBCKTagmFlAd/2MtXcxwEatIQVPq487NigFwlrkvmxQuMpl1TRf3xxw==`
+- 4.2.120：`sha512-xhITm18dZ6DclPaI1jEiTVOoXYQASsubbDEs3Ik1AjmVSXdNFtvdvzLVwhPQ8eHu1OXsxtWfuW+wpGHib8V4hw==`
+
+脚本通过官方 package spec 执行离线 `npm pack`（读取 npm cache），对实际 `.tgz` 同时重算完整 SRI 与 SHA-256；无匹配缓存或任一摘要不一致都会失败，不会只信任文档或 lockfile 字符串。

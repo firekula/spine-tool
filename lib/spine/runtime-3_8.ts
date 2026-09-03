@@ -37,6 +37,7 @@ const adapter = {
   isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (
     attachment instanceof spine.RegionAttachment
   ),
+  updateSkeleton: (skeleton: { update(delta: number): void }, delta: number) => skeleton.update(delta),
   updateWorldTransform: (skeleton: { updateWorldTransform(): void }) => skeleton.updateWorldTransform(),
 } as unknown as RuntimeAdapter;
 

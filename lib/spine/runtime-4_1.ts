@@ -24,6 +24,8 @@ const adapter = {
   isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (
     attachment instanceof runtime.RegionAttachment
   ),
+  // 4.1.56's Skeleton has no clock/update method; attachment timing is driven by AnimationState.
+  updateSkeleton: () => undefined,
   updateWorldTransform: (skeleton: runtime.Skeleton) => skeleton.updateWorldTransform(),
 } as unknown as RuntimeAdapter;
 

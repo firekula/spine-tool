@@ -24,6 +24,7 @@ const adapter = {
   isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (
     attachment instanceof runtime.RegionAttachment
   ),
+  updateSkeleton: (skeleton: runtime.Skeleton, delta: number) => skeleton.update(delta),
   updateWorldTransform: (skeleton: runtime.Skeleton) => skeleton.updateWorldTransform(runtime.Physics.update),
 } as unknown as RuntimeAdapter;
 

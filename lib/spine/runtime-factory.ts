@@ -11,6 +11,8 @@ type RuntimeConstructor<T = any> = new (...args: any[]) => T;
 
 interface RuntimeAtlasPage {
   name: string;
+  minFilter?: number;
+  pma?: boolean;
   texture?: { dispose?(): void } | null;
   setTexture?(texture: unknown): void;
 }
@@ -92,14 +94,60 @@ export interface RuntimeAdapter {
     SceneRenderer: RuntimeConstructor<RuntimeRenderer>;
   };
   isRegionAttachment(attachment: unknown): attachment is { width: number; height: number };
+  updateSkeleton(skeleton: RuntimeSkeleton, delta: number): void;
   updateWorldTransform(skeleton: RuntimeSkeleton): void;
 }
 
-function loadImage(objectUrl: string): Promise<HTMLImageElement> {
+class LoadCancellation {
+  private cancelled = false;
+  private listeners = new Set<() => void>();
+
+  cancel(): void {
+    if (this.cancelled) return;
+    this.cancelled = true;
+    for (const listener of this.listeners) listener();
+    this.listeners.clear();
+  }
+
+  isCancelled(): boolean {
+    return this.cancelled;
+  }
+
+  onCancel(listener: () => void): () => void {
+    if (this.cancelled) {
+      listener();
+      return () => undefined;
+    }
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+}
+
+function loadCancelledError(): Error {
+  const error = new Error("Runtime load 已取消");
+  error.name = "AbortError";
+  return error;
+}
+
+function loadImage(objectUrl: string, cancellation: LoadCancellation): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`无法加载纹理对象 URL: ${objectUrl}`));
+    let settled = false;
+    let removeCancellationListener: () => void = () => {};
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      removeCancellationListener();
+      action();
+    };
+    image.onload = () => finish(() => resolve(image));
+    image.onerror = () => finish(() => reject(new Error(`无法加载纹理对象 URL: ${objectUrl}`)));
+    removeCancellationListener = cancellation.onCancel(() => (
+      finish(() => reject(loadCancelledError()))
+    ));
+    if (settled) return;
     image.src = objectUrl;
   });
 }
@@ -117,33 +165,139 @@ function textureForPage<T>(textures: ReadonlyMap<string, T>, pageName: string): 
   throw new Error(`Atlas 纹理页未提供对象 URL: ${pageName}`);
 }
 
+interface AtlasPageConfig {
+  name: string;
+  useMipMaps: boolean;
+  premultipliedAlpha: boolean;
+}
+
+function normalizePageName(name: string): string {
+  return name.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/** Reads only page-level rendering fields, leaving the full Atlas parse to the selected Runtime. */
+function atlasPageConfigs(atlasText: string): AtlasPageConfig[] {
+  const configs: AtlasPageConfig[] = [];
+  let current: AtlasPageConfig | null = null;
+  let afterBlank = true;
+
+  for (const rawLine of atlasText.replace(/\r\n?/g, "\n").split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      afterBlank = true;
+      current = null;
+      continue;
+    }
+
+    const attribute = line.match(/^([^:]+):\s*(.*?)\s*$/);
+    if (attribute) {
+      if (!current) continue; // Atlas header or region field.
+      const key = attribute[1]!.trim().toLowerCase();
+      const value = attribute[2]!.trim();
+      if (key === "filter") {
+        const minFilter = value.split(",", 1)[0]?.trim() ?? "";
+        current.useMipMaps = /^mipmap/i.test(minFilter);
+      } else if (key === "pma") {
+        current.premultipliedAlpha = /^true$/i.test(value);
+      }
+      afterBlank = false;
+      continue;
+    }
+
+    if (afterBlank) {
+      current = { name: line, useMipMaps: false, premultipliedAlpha: false };
+      configs.push(current);
+    } else {
+      current = null; // First region name ends the page property block.
+    }
+    afterBlank = false;
+  }
+
+  return configs;
+}
+
+function pageConfig(configs: AtlasPageConfig[], pageName: string): AtlasPageConfig | undefined {
+  const normalizedName = normalizePageName(pageName);
+  return configs.find(({ name }) => normalizePageName(name) === normalizedName);
+}
+
+function pageUsesMipMaps(page: RuntimeAtlasPage, config: AtlasPageConfig | undefined): boolean {
+  // WebGL mipmap minification filters occupy this contiguous enum range.
+  if (typeof page.minFilter === "number") return page.minFilter >= 9984 && page.minFilter <= 9987;
+  return config?.useMipMaps ?? false;
+}
+
+function atlasPremultipliedAlpha(atlas: RuntimeAtlas, configs: AtlasPageConfig[]): boolean {
+  const values = atlas.pages.map((page) => (
+    typeof page.pma === "boolean"
+      ? page.pma
+      : pageConfig(configs, page.name)?.premultipliedAlpha ?? false
+  ));
+  if (new Set(values).size > 1) {
+    throw new Error("Atlas 包含混合 PMA（预乘 Alpha）纹理页，当前 Spine renderer 只能为整具 skeleton 使用一种混合模式");
+  }
+  return values[0] ?? false;
+}
+
+interface CreatedAtlas {
+  atlas: RuntimeAtlas;
+  premultipliedAlpha: boolean;
+}
+
 async function createAtlas(
   input: RuntimeLoadInput,
   context: WebGLRenderingContext,
   adapter: RuntimeAdapter,
-): Promise<RuntimeAtlas> {
+  cancellation: LoadCancellation,
+): Promise<CreatedAtlas> {
+  const configs = atlasPageConfigs(input.atlasText);
   const images = new Map<string, HTMLImageElement>();
   await Promise.all([...input.textureObjectUrls].map(async ([name, url]) => {
-    images.set(name, await loadImage(url));
+    images.set(name, await loadImage(url, cancellation));
   }));
+  if (cancellation.isCancelled()) throw loadCancelledError();
 
   const { GLTexture, TextureAtlas } = adapter.constructors;
   if (adapter.atlasMode === "constructor-loader") {
-    return new TextureAtlas(input.atlasText, (pageName: string) => (
-      new GLTexture(context, textureForPage(images, pageName))
-    ));
+    const createdTextures: Array<{ dispose?(): void }> = [];
+    let atlas: RuntimeAtlas | null = null;
+    try {
+      atlas = new TextureAtlas(input.atlasText, (pageName: string) => {
+        const texture = new GLTexture(
+          context,
+          textureForPage(images, pageName),
+          pageConfig(configs, pageName)?.useMipMaps ?? false,
+        );
+        createdTextures.push(texture);
+        return texture;
+      });
+      const premultipliedAlpha = atlasPremultipliedAlpha(atlas, configs);
+      return { atlas, premultipliedAlpha };
+    } catch (error) {
+      if (atlas) atlas.dispose();
+      else for (const texture of createdTextures) texture.dispose?.();
+      throw error;
+    }
   }
 
   const atlas = new TextureAtlas(input.atlasText);
+  const createdTextures: Array<{ dispose?(): void }> = [];
   try {
     for (const page of atlas.pages) {
-      const texture = new GLTexture(context, textureForPage(images, page.name));
+      const texture = new GLTexture(
+        context,
+        textureForPage(images, page.name),
+        pageUsesMipMaps(page, pageConfig(configs, page.name)),
+      );
+      createdTextures.push(texture);
       if (page.setTexture) page.setTexture(texture);
       else page.texture = texture;
     }
-    return atlas;
+    return { atlas, premultipliedAlpha: atlasPremultipliedAlpha(atlas, configs) };
   } catch (error) {
-    atlas.dispose();
+    // 4.0 TextureAtlas.dispose assumes every page already has a texture, so
+    // dispose the successfully constructed subset ourselves on partial loads.
+    for (const texture of createdTextures) texture.dispose?.();
     throw error;
   }
 }
@@ -185,6 +339,9 @@ class RuntimeBridge implements SpineRuntimeBridge {
   private paused = false;
   private speed = 1;
   private disposed = false;
+  private loadGeneration = 0;
+  private pendingLoads = new Map<number, { cancel(): void }>();
+  private premultipliedAlpha = false;
 
   constructor(version: SupportedSpineVersion, private readonly adapter: RuntimeAdapter) {
     this.version = version;
@@ -194,17 +351,40 @@ class RuntimeBridge implements SpineRuntimeBridge {
     if (this.disposed) throw new Error("Runtime bridge 已释放");
     if (this.atlas || this.renderer || this.state) throw new Error("Runtime bridge 已加载资源");
 
-    const context = input.canvas.getContext("webgl", {
-      alpha: true,
-      antialias: true,
-      premultipliedAlpha: true,
+    const generation = ++this.loadGeneration;
+    for (const pending of this.pendingLoads.values()) pending.cancel();
+    const cancellation = new LoadCancellation();
+    let objectUrlsReleased = false;
+    const releaseObjectUrls = (): void => {
+      if (objectUrlsReleased) return;
+      objectUrlsReleased = true;
+      if (typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function") return;
+      for (const url of new Set(input.textureObjectUrls.values())) URL.revokeObjectURL(url);
+    };
+    this.pendingLoads.set(generation, {
+      cancel: () => {
+        cancellation.cancel();
+        releaseObjectUrls();
+      },
     });
-    if (!context) throw new Error("浏览器不支持 WebGL");
 
-    const atlas = await createAtlas(input, context, this.adapter);
+    let createdAtlas: CreatedAtlas | null = null;
     let renderer: RuntimeRenderer | null = null;
     let state: RuntimeAnimationState | null = null;
     try {
+      const context = input.canvas.getContext("webgl", {
+        alpha: true,
+        antialias: true,
+        premultipliedAlpha: true,
+      });
+      if (!context) throw new Error("浏览器不支持 WebGL");
+
+      createdAtlas = await createAtlas(input, context, this.adapter, cancellation);
+      releaseObjectUrls();
+      if (this.disposed || generation !== this.loadGeneration || cancellation.isCancelled()) {
+        throw loadCancelledError();
+      }
+
       const {
         AnimationState,
         AnimationStateData,
@@ -214,7 +394,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
         SkeletonBinary,
         SkeletonJson,
       } = this.adapter.constructors;
-      const attachmentLoader = new AtlasAttachmentLoader(atlas);
+      const attachmentLoader = new AtlasAttachmentLoader(createdAtlas.atlas);
       const reader = input.skeleton.kind === "json"
         ? new SkeletonJson(attachmentLoader)
         : new SkeletonBinary(attachmentLoader);
@@ -226,23 +406,38 @@ class RuntimeBridge implements SpineRuntimeBridge {
       state.timeScale = this.speed;
       renderer = new SceneRenderer(input.canvas, context, true);
 
-      this.atlas = atlas;
-      this.canvas = input.canvas;
-      this.renderer = renderer;
-      this.skeleton = skeleton;
-      this.state = state;
-
-      return {
+      const metadata = {
         animations: data.animations.map(({ name, duration }) => ({ name, duration })),
         skins: data.skins.map(({ name }) => name),
         slots: data.slots.map(({ name }) => name),
         regionAttachments: regionAttachmentMetadata(data, this.adapter),
       };
+      if (this.disposed || generation !== this.loadGeneration || cancellation.isCancelled()) {
+        throw loadCancelledError();
+      }
+
+      this.atlas = createdAtlas.atlas;
+      this.canvas = input.canvas;
+      this.renderer = renderer;
+      this.skeleton = skeleton;
+      this.state = state;
+      this.premultipliedAlpha = createdAtlas.premultipliedAlpha;
+      createdAtlas = null;
+      renderer = null;
+      state = null;
+
+      return metadata;
     } catch (error) {
+      const stale = this.disposed || generation !== this.loadGeneration || cancellation.isCancelled();
+      cancellation.cancel();
       state?.clearTracks();
       renderer?.dispose();
-      atlas.dispose();
+      createdAtlas?.atlas.dispose();
+      if (stale) throw loadCancelledError();
       throw error;
+    } finally {
+      releaseObjectUrls();
+      this.pendingLoads.delete(generation);
     }
   }
 
@@ -310,31 +505,50 @@ class RuntimeBridge implements SpineRuntimeBridge {
     const { renderer, skeleton, state } = this;
     if (!renderer || !skeleton || !state) return this.snapshot();
 
-    if (!this.paused) state.update(Math.max(0, deltaSeconds));
+    if (!this.paused) {
+      const delta = Math.max(0, deltaSeconds);
+      state.update(delta);
+      this.adapter.updateSkeleton(skeleton, delta * this.speed);
+    }
     state.apply(skeleton);
 
-    // AnimationState may restore attachments on every apply. Hide only after
-    // that restoration, so hidden slots remain hidden without losing state.
-    for (const slot of skeleton.slots) {
-      if (this.hiddenSlots.has(slot.data.name)) slot.setAttachment(null);
-    }
+    // Mask attachments only for the renderer. Direct assignment preserves
+    // attachment time, deform, and sequence state across this temporary hide.
     this.adapter.updateWorldTransform(skeleton);
-
-    const gl = renderer.context?.gl;
-    if (gl) {
-      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
+    const hiddenAttachments: Array<[RuntimeSlot, unknown]> = [];
+    for (const slot of skeleton.slots) {
+      if (this.hiddenSlots.has(slot.data.name)) {
+        hiddenAttachments.push([slot, slot.attachment]);
+        slot.attachment = null;
+      }
     }
-    renderer.begin();
-    renderer.drawSkeleton(skeleton, true);
-    renderer.end();
+    let rendererBegun = false;
+    try {
+      const gl = renderer.context?.gl;
+      if (gl) {
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+      renderer.begin();
+      rendererBegun = true;
+      renderer.drawSkeleton(skeleton, this.premultipliedAlpha);
+    } finally {
+      try {
+        if (rendererBegun) renderer.end();
+      } finally {
+        for (const [slot, attachment] of hiddenAttachments) slot.attachment = attachment;
+      }
+    }
     return this.snapshot();
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.loadGeneration += 1;
+    for (const pending of this.pendingLoads.values()) pending.cancel();
+    this.pendingLoads.clear();
     this.state?.clearTracks();
     this.renderer?.dispose();
     this.atlas?.dispose();
@@ -344,6 +558,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
     this.skeleton = null;
     this.state = null;
     this.entry = null;
+    this.premultipliedAlpha = false;
     this.hiddenSlots.clear();
   }
 

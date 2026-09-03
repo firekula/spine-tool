@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntimeBridge, type RuntimeAdapter } from "@/lib/spine/runtime-factory";
 import { loadRuntimeModule } from "@/lib/spine/runtime-loader";
 import type { RuntimeLoadInput } from "@/lib/spine/bridge-types";
@@ -18,6 +20,11 @@ const EXPECTED_SOURCES = {
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
 describe("loadRuntimeModule", () => {
   it.each(["3.8", "4.0", "4.1", "4.2"] as const)(
     "为 %s 加载可实例化的对应官方 Runtime",
@@ -31,6 +38,14 @@ describe("loadRuntimeModule", () => {
       const skeletonData = new module.runtimeConstructors.SkeletonData();
       const skeleton = new module.runtimeConstructors.Skeleton(skeletonData);
       expect(skeleton.data).toBe(skeletonData);
+      if (version === "4.1") {
+        expect((skeleton as { update?: unknown }).update).toBeUndefined();
+        expect((skeleton as { time?: unknown }).time).toBeUndefined();
+      } else {
+        const timedSkeleton = skeleton as unknown as { time: number; update(delta: number): void };
+        timedSkeleton.update(0.25);
+        expect(timedSkeleton.time).toBe(0.25);
+      }
     },
   );
 
@@ -53,19 +68,71 @@ describe("Runtime 资产验证", () => {
 
     expect(output).toContain("Verified 4 isolated Spine runtimes");
   });
+
+  it.each([
+    ["非官方 resolved URL", "resolved", "https://example.invalid/spine-webgl-4.0.31.tgz"],
+    ["不精确的 SRI", "integrity", "sha512-not-the-official-tarball"],
+  ] as const)("拒绝 lockfile 中%s", (_label, field, invalidValue) => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-lock-"));
+    const fixtureLockfile = join(fixtureDirectory, "package-lock.json");
+    try {
+      const lockfile = JSON.parse(readFileSync(resolve(repositoryRoot, "package-lock.json"), "utf8"));
+      const packagePath = "node_modules/@esotericsoftware/spine-webgl-4.0";
+      lockfile.packages[packagePath][field] = invalidValue;
+      writeFileSync(fixtureLockfile, JSON.stringify(lockfile));
+
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_LOCKFILE: fixtureLockfile },
+          stdio: "pipe",
+        },
+      )).toThrow();
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
 });
 
-function createHarness() {
+interface HarnessOptions {
+  applyRestoresAttachment?: boolean;
+  atlasMode?: "constructor-loader" | "page-setter";
+  onTextureCreated?: () => void;
+  pages?: Array<{ name: string }>;
+}
+
+function createHarness(options: HarnessOptions = {}) {
   const events: string[] = [];
-  const disposed = { atlas: 0, renderer: 0, state: 0 };
+  const disposed = { atlas: 0, renderer: 0, state: 0, texture: 0 };
+  const drawnAttachments: unknown[] = [];
+  const drawPremultipliedAlpha: boolean[] = [];
+  const skeletonDeltas: number[] = [];
+  const textureMipMaps: boolean[] = [];
   const visibleAttachment = { width: 64, height: 32 };
+  let loadedSkeleton: Skeleton | null = null;
 
   class TextureAtlas {
-    pages: Array<{ name: string }> = [];
+    pages = (options.pages ?? []).map(({ name }) => ({
+      name,
+      texture: null as { dispose?(): void } | null,
+      setTexture(texture: { dispose?(): void }) {
+        this.texture = texture;
+      },
+    }));
     regions: unknown[] = [];
+
+    constructor(_atlasText?: string, textureLoader?: (pageName: string) => { dispose?(): void }) {
+      if (textureLoader) {
+        for (const page of this.pages) page.texture = textureLoader(page.name);
+      }
+    }
 
     dispose() {
       disposed.atlas += 1;
+      for (const page of this.pages) page.texture?.dispose?.();
     }
   }
 
@@ -122,8 +189,17 @@ function createHarness() {
       },
     }];
     skin: Skin | null = defaultSkin;
+    time = 0;
 
-    constructor(public readonly data: typeof skeletonData) {}
+    constructor(public readonly data: typeof skeletonData) {
+      loadedSkeleton = this;
+    }
+
+    update(delta: number) {
+      this.time += delta;
+      skeletonDeltas.push(delta);
+      events.push("skeleton.update");
+    }
 
     setSkin(skin: Skin | null) {
       this.skin = skin;
@@ -149,7 +225,7 @@ function createHarness() {
 
     apply(skeleton: Skeleton) {
       events.push("state.apply");
-      skeleton.slots[0]!.attachment = visibleAttachment;
+      if (options.applyRestoresAttachment) skeleton.slots[0]!.attachment = visibleAttachment;
     }
 
     setAnimation(_trackIndex: number, name: string, loop: boolean) {
@@ -163,7 +239,16 @@ function createHarness() {
     }
   }
 
-  class GLTexture {}
+  class GLTexture {
+    constructor(_context: unknown, _image: unknown, useMipMaps = false) {
+      textureMipMaps.push(useMipMaps);
+      options.onTextureCreated?.();
+    }
+
+    dispose() {
+      disposed.texture += 1;
+    }
+  }
 
   class SceneRenderer {
     readonly camera = {
@@ -177,8 +262,10 @@ function createHarness() {
       events.push("renderer.begin");
     }
 
-    drawSkeleton() {
+    drawSkeleton(skeleton: Skeleton, premultipliedAlpha = false) {
       events.push("renderer.draw");
+      drawnAttachments.push(skeleton.slots[0]!.attachment);
+      drawPremultipliedAlpha.push(premultipliedAlpha);
     }
 
     end() {
@@ -196,7 +283,7 @@ function createHarness() {
   }
 
   const runtime: RuntimeAdapter = {
-    atlasMode: "page-setter",
+    atlasMode: options.atlasMode ?? "page-setter",
     constructors: {
       TextureAtlas,
       AtlasAttachmentLoader,
@@ -214,6 +301,7 @@ function createHarness() {
     isRegionAttachment: (attachment): attachment is { width: number; height: number } => (
       attachment === visibleAttachment
     ),
+    updateSkeleton: (skeleton, delta) => (skeleton as Skeleton).update(delta),
     updateWorldTransform: () => events.push("skeleton.world"),
   };
 
@@ -231,12 +319,53 @@ function createHarness() {
     canvas,
   };
 
-  return { canvas, disposed, events, input, runtime, visibleAttachment };
+  return {
+    canvas,
+    disposed,
+    drawPremultipliedAlpha,
+    drawnAttachments,
+    events,
+    input,
+    loadedSkeleton: () => loadedSkeleton,
+    runtime,
+    skeletonDeltas,
+    textureMipMaps,
+    visibleAttachment,
+  };
+}
+
+function installImmediateImages(): void {
+  class ImmediateImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+
+    set src(_value: string) {
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+  vi.stubGlobal("Image", ImmediateImage);
+}
+
+function installDeferredImages(): Map<string, { succeed(): void; fail(): void }> {
+  const requests = new Map<string, { succeed(): void; fail(): void }>();
+  class DeferredImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+
+    set src(value: string) {
+      requests.set(value, {
+        succeed: () => this.onload?.(),
+        fail: () => this.onerror?.(),
+      });
+    }
+  }
+  vi.stubGlobal("Image", DeferredImage);
+  return requests;
 }
 
 describe("createRuntimeBridge", () => {
   it("在动画重新应用 attachment 后的每一帧清空隐藏插槽", async () => {
-    const harness = createHarness();
+    const harness = createHarness({ applyRestoresAttachment: true });
     const bridge = createRuntimeBridge("4.1", harness.runtime);
     const metadata = await bridge.load(harness.input);
 
@@ -266,18 +395,172 @@ describe("createRuntimeBridge", () => {
     });
     expect(harness.events).toEqual([
       "state.update",
+      "skeleton.update",
       "state.apply",
-      "slot.hide",
       "skeleton.world",
       "renderer.begin",
       "renderer.draw",
       "renderer.end",
     ]);
+    expect(harness.drawnAttachments).toEqual([null]);
+    expect(harness.loadedSkeleton()?.slots[0]?.attachment).toBe(harness.visibleAttachment);
 
     harness.events.length = 0;
     bridge.frame(0.25);
     expect(harness.events.filter((event) => event === "state.apply")).toHaveLength(1);
-    expect(harness.events.filter((event) => event === "slot.hide")).toHaveLength(1);
+    expect(harness.drawnAttachments).toEqual([null, null]);
+  });
+
+  it("绘制隐藏静态插槽后恢复 attachment，取消隐藏不会永久丢图", async () => {
+    const harness = createHarness({ applyRestoresAttachment: false });
+    const bridge = createRuntimeBridge("4.1", harness.runtime);
+    await bridge.load(harness.input);
+
+    bridge.setHiddenSlots(new Set(["body"]));
+    bridge.frame(0.25);
+    expect(harness.drawnAttachments).toEqual([null]);
+    expect(harness.loadedSkeleton()?.slots[0]?.attachment).toBe(harness.visibleAttachment);
+
+    bridge.setHiddenSlots(new Set());
+    bridge.frame(0.25);
+    expect(harness.drawnAttachments).toEqual([null, harness.visibleAttachment]);
+  });
+
+  it("按播放速度推进 skeleton 时间，暂停时不推进", async () => {
+    const harness = createHarness();
+    const bridge = createRuntimeBridge("4.2", harness.runtime);
+    await bridge.load(harness.input);
+    bridge.play("idle", true);
+    bridge.setSpeed(2);
+
+    bridge.frame(0.25);
+    expect(harness.skeletonDeltas).toEqual([0.5]);
+    expect(harness.loadedSkeleton()?.time).toBe(0.5);
+
+    bridge.pause(true);
+    bridge.frame(10);
+    expect(harness.skeletonDeltas).toEqual([0.5]);
+    expect(harness.loadedSkeleton()?.time).toBe(0.5);
+  });
+
+  it("重复 load 只提交最新结果，并取消较晚完成的旧 load", async () => {
+    const requests = installDeferredImages();
+    const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ pages: [{ name: "page.png" }] });
+    const bridge = createRuntimeBridge("4.1", harness.runtime);
+    const firstCanvas = { ...harness.canvas, style: { width: "", height: "" } } as HTMLCanvasElement;
+    const secondCanvas = { ...harness.canvas, style: { width: "", height: "" } } as HTMLCanvasElement;
+    const first = bridge.load({
+      ...harness.input,
+      canvas: firstCanvas,
+      atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["page.png", "blob:first"]]),
+    });
+    const second = bridge.load({
+      ...harness.input,
+      canvas: secondCanvas,
+      atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["page.png", "blob:second"]]),
+    });
+
+    requests.get("blob:second")!.succeed();
+    await second;
+    requests.get("blob:first")!.succeed();
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+
+    bridge.resize(100, 50, 1);
+    expect(secondCanvas.width).toBe(100);
+    expect(firstCanvas.width).toBe(0);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:first");
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:second");
+  });
+
+  it("dispose 会取消待完成 load，且完成回调不能重新挂载资源", async () => {
+    const requests = installDeferredImages();
+    const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ pages: [{ name: "page.png" }] });
+    const bridge = createRuntimeBridge("4.0", harness.runtime);
+    const loading = bridge.load({
+      ...harness.input,
+      atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["page.png", "blob:disposed"]]),
+    });
+
+    bridge.dispose();
+    bridge.dispose();
+    requests.get("blob:disposed")!.succeed();
+    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
+    expect(revokeObjectUrl).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:disposed");
+    expect(harness.disposed).toEqual({ atlas: 0, renderer: 0, state: 0, texture: 0 });
+  });
+
+  it("dispose 在 GPU 纹理创建后抢占 load 时，过期资源仍由该 load 清理", async () => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    let bridge: ReturnType<typeof createRuntimeBridge>;
+    const harness = createHarness({
+      pages: [{ name: "page.png" }],
+      onTextureCreated: () => queueMicrotask(() => bridge.dispose()),
+    });
+    bridge = createRuntimeBridge("4.2", harness.runtime);
+
+    await expect(bridge.load({
+      ...harness.input,
+      atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["page.png", "blob:gpu-stale"]]),
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(harness.disposed).toEqual({ atlas: 1, renderer: 0, state: 0, texture: 1 });
+  });
+
+  it.each([
+    { atlasMode: "constructor-loader", version: "3.8" },
+    { atlasMode: "page-setter", version: "4.0" },
+  ] as const)("$version 按 Atlas filter 创建 mipmap，非 PMA page 使用普通 Alpha blending", async ({ atlasMode, version }) => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ atlasMode, pages: [{ name: "page.png" }] });
+    const bridge = createRuntimeBridge(version, harness.runtime);
+    await bridge.load({
+      ...harness.input,
+      atlasText: "page.png\nsize: 2,2\nfilter: MipMapLinearLinear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["page.png", "blob:mipmap"]]),
+    });
+
+    expect(harness.textureMipMaps).toEqual([true]);
+    bridge.frame(0);
+    expect(harness.drawPremultipliedAlpha).toEqual([false]);
+  });
+
+  it("把 Atlas page 的 PMA=true 传给 renderer", async () => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ pages: [{ name: "page.png" }] });
+    const bridge = createRuntimeBridge("4.0", harness.runtime);
+    await bridge.load({
+      ...harness.input,
+      atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\npma: true\n",
+      textureObjectUrls: new Map([["page.png", "blob:pma"]]),
+    });
+
+    bridge.frame(0);
+    expect(harness.drawPremultipliedAlpha).toEqual([true]);
+  });
+
+  it("拒绝 renderer 无法全局表达的多页混合 PMA", async () => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ pages: [{ name: "a.png" }, { name: "b.png" }] });
+    const bridge = createRuntimeBridge("4.2", harness.runtime);
+
+    await expect(bridge.load({
+      ...harness.input,
+      atlasText: [
+        "a.png", "size: 2,2", "filter: Linear,Linear", "repeat: none", "pma: true", "",
+        "b.png", "size: 2,2", "filter: Linear,Linear", "repeat: none", "pma: false", "",
+      ].join("\n"),
+      textureObjectUrls: new Map([["a.png", "blob:a"], ["b.png", "blob:b"]]),
+    })).rejects.toThrow(/PMA|预乘/);
   });
 
   it("支持暂停、seek 和组合皮肤", async () => {
@@ -319,6 +602,6 @@ describe("createRuntimeBridge", () => {
 
     bridge.dispose();
     bridge.dispose();
-    expect(harness.disposed).toEqual({ atlas: 1, renderer: 1, state: 1 });
+    expect(harness.disposed).toEqual({ atlas: 1, renderer: 1, state: 1, texture: 0 });
   });
 });

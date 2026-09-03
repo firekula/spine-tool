@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { build } from "vite";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const normalizedRoot = repositoryRoot.split(sep).join("/");
 const isProjectPath = (moduleId, projectPath) => moduleId.startsWith(`${normalizedRoot}${projectPath}`);
+const execFileAsync = promisify(execFile);
 
 const runtimes = {
   "3.8": {
@@ -18,18 +22,24 @@ const runtimes = {
     alias: "@esotericsoftware/spine-webgl-4.0",
     entry: "/lib/spine/runtime-4_0.ts",
     version: "4.0.31",
+    resolved: "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
+    integrity: "sha512-G6j31+caQJck/4UN8TVaTKnU0RPysI7ECMkCxcXBGsTmv98m0O5Wx18YgeIf//Bg8KAO+mZ/DmwzeScwGG9HPA==",
     tarballSha256: "fdfe7fc72b870a4da238f349634dd043390b5035dbce6782e7e4288adc6648a1",
   },
   "4.1": {
     alias: "@esotericsoftware/spine-webgl-4.1",
     entry: "/lib/spine/runtime-4_1.ts",
     version: "4.1.56",
+    resolved: "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
+    integrity: "sha512-LNr/X4B81/rC96mzFV+L5LPnqaIj1v3RBCKTagmFlAd/2MtXcxwEatIQVPq487NigFwlrkvmxQuMpl1TRf3xxw==",
     tarballSha256: "fc9c0c579e7d91fcba007fabdc7ecced6fad70fca84bd6e3374a3a4f6ac23e4d",
   },
   "4.2": {
     alias: "@esotericsoftware/spine-webgl-4.2",
     entry: "/lib/spine/runtime-4_2.ts",
     version: "4.2.120",
+    resolved: "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
+    integrity: "sha512-xhITm18dZ6DclPaI1jEiTVOoXYQASsubbDEs3Ik1AjmVSXdNFtvdvzLVwhPQ8eHu1OXsxtWfuW+wpGHib8V4hw==",
     tarballSha256: "d1cfacd523602524ed497c8b794cd394a52cc8118cf6a680b4542585e1f36666",
   },
 };
@@ -43,12 +53,43 @@ async function sha256(path) {
   return createHash("sha256").update(contents).digest("hex");
 }
 
+async function packedTarballDigests(version) {
+  const packDirectory = await mkdtemp(resolve(tmpdir(), "spine-runtime-pack-"));
+  try {
+    const { stdout } = await execFileAsync(
+      process.platform === "win32" ? "npm.cmd" : "npm",
+      [
+        "pack",
+        `@esotericsoftware/spine-webgl@${version}`,
+        "--pack-destination", packDirectory,
+        "--ignore-scripts",
+        "--silent",
+        "--offline",
+        "--registry=https://registry.npmjs.org/",
+      ],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    );
+    const filename = basename(stdout.trim().split(/\r?\n/).at(-1) ?? "");
+    assert.ok(filename.endsWith(".tgz"), `npm pack did not return a tarball for ${version}`);
+    const contents = await readFile(resolve(packDirectory, filename));
+    return {
+      integrity: `sha512-${createHash("sha512").update(contents).digest("base64")}`,
+      sha256: createHash("sha256").update(contents).digest("hex"),
+    };
+  } finally {
+    await rm(packDirectory, { recursive: true, force: true });
+  }
+}
+
 function sha256Contents(contents) {
   return createHash("sha256").update(contents).digest("hex");
 }
 
 const packageJson = await json("package.json");
-const packageLock = await json("package-lock.json");
+const packageLockPath = process.env.SPINE_RUNTIME_LOCKFILE
+  ? resolve(process.env.SPINE_RUNTIME_LOCKFILE)
+  : resolve(repositoryRoot, "package-lock.json");
+const packageLock = JSON.parse(await readFile(packageLockPath, "utf8"));
 const documentation = await readFile(resolve(repositoryRoot, "docs/runtime-versions.md"), "utf8");
 const provenance = await json("vendor/spine-runtime-3.8/SOURCE.json");
 
@@ -112,8 +153,13 @@ for (const [editorVersion, runtime] of Object.entries(runtimes)) {
   assert.equal(installedPackage.version, runtime.version);
   assert.equal(lockedPackage.version, runtime.version);
   assert.equal(lockedPackage.dependencies["@esotericsoftware/spine-core"], runtime.version);
-  assert.ok(lockedPackage.integrity.startsWith("sha512-"));
+  assert.equal(lockedPackage.resolved, runtime.resolved);
+  assert.equal(lockedPackage.integrity, runtime.integrity);
   assert.ok(documentation.includes(runtime.tarballSha256));
+  const packedTarball = await packedTarballDigests(runtime.version);
+  assert.equal(packedTarball.integrity, runtime.integrity);
+  assert.equal(packedTarball.sha256, runtime.tarballSha256);
+  console.log(`${editorVersion}: official npm tarball SHA-256 ${packedTarball.sha256}`);
   assert.equal(
     await sha256(`${packagePath}/LICENSE`),
     runtime.version === "4.2.120"
