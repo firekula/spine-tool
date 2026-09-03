@@ -6,6 +6,38 @@ const oldAtlas = readFileSync(new URL("../fixtures/atlas-old.atlas", import.meta
 const newAtlas = readFileSync(new URL("../fixtures/atlas-new.atlas", import.meta.url), "utf8");
 
 describe("parseAtlas", () => {
+  it("拒绝空 Atlas 并指出需要纹理页", () => {
+    expect(() => parseAtlas("\n \n")).toThrowError(expect.objectContaining({
+      code: "MISSING_PAGE",
+      pageName: undefined,
+      regionName: undefined,
+    }));
+  });
+
+  it.each([
+    "page.png\nsize: 64,\n",
+    "page.png\nsize: ,64\n",
+    "page.png\nsize: 64,64\n\nregion\nxy: ,0\nsize: 1,1\norig: 1,1\noffset: 0,0",
+  ])("拒绝包含空数字分量的属性：%s", (source) => {
+    expect(() => parseAtlas(source)).toThrowError(expect.objectContaining({ code: "INVALID_VALUE" }));
+  });
+
+  it("分别标记纹理页与 Region 错误对象", () => {
+    try {
+      parseAtlas("page.png\nsize: -1,64");
+      throw new Error("Expected page error");
+    } catch (error) {
+      expect(error).toMatchObject({ pageName: "page.png", regionName: undefined });
+    }
+
+    try {
+      parseAtlas("page.png\nsize: 64,64\n\nbad\nxy: 0,0");
+      throw new Error("Expected region error");
+    } catch (error) {
+      expect(error).toMatchObject({ pageName: "page.png", regionName: "bad" });
+    }
+  });
+
   it.each([
     [oldAtlas, { x: 4, y: 8, packedWidth: 12, packedHeight: 20, originalWidth: 32, originalHeight: 40, offsetLeft: 3, offsetBottom: 5, rotation: 90 }],
     [newAtlas, { x: 4, y: 8, packedWidth: 12, packedHeight: 20, originalWidth: 32, originalHeight: 40, offsetLeft: 3, offsetBottom: 5, rotation: 90 }],

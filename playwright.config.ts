@@ -14,7 +14,9 @@ await mkdir(runtimeTemp, { recursive: true });
 process.env.TMPDIR = runtimeTemp;
 process.env.FONTCONFIG_PATH = join(runtimeTemp, "fonts");
 const { default: chromium } = await import("@sparticuz/chromium");
-chromium.setGraphicsMode = false;
+// The application under test is a WebGL tool. Sparticuz otherwise adds
+// --disable-webgl, which would only exercise the Atlas-only fallback path.
+chromium.setGraphicsMode = true;
 
 const require = createRequire(import.meta.url);
 const chromiumEntry = require.resolve("@sparticuz/chromium");

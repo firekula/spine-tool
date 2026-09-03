@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ExportPanel } from "@/components/export-panel";
 import type { AtlasDocument } from "@/lib/atlas/types";
@@ -6,12 +6,12 @@ import type { ScaleInference } from "@/lib/spine/scale-inference";
 
 const atlas: AtlasDocument = {
   pages: [{ name: "page.png", width: 64, height: 64, custom: {} }],
-  regions: [{
-    name: "body/head", pageName: "page.png", index: 0,
+  regions: ["body/head", "effects/a-very-long-region-name"].map((name, index) => ({
+    name, pageName: "page.png", index,
     x: 0, y: 0, packedWidth: 16, packedHeight: 16,
     originalWidth: 16, originalHeight: 16, offsetLeft: 0, offsetBottom: 0,
     rotation: 0, custom: {},
-  }],
+  })),
 };
 
 const inferredScale: ScaleInference = {
@@ -30,6 +30,15 @@ function renderPanel() {
 afterEach(() => cleanup());
 
 describe("ExportPanel", () => {
+  it("可搜索很长的 Region 名称且保留完整 title", () => {
+    renderPanel();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索 Region" }), { target: { value: "very-long" } });
+
+    expect(screen.queryByText("body/head")).toBeNull();
+    expect(screen.getByTitle("effects/a-very-long-region-name")).toBeTruthy();
+  });
+
   it.each(["0", "-1", "NaN", "Infinity"])("阻断无效单项倍率 %s", (value) => {
     renderPanel();
 
@@ -49,5 +58,18 @@ describe("ExportPanel", () => {
     expect(screen.getByText("50%")).toBeTruthy();
     expect(screen.getByText("最终恢复倍率")).toBeTruthy();
     expect(screen.getByText("2 × 1.25 = 2.5 倍")).toBeTruthy();
+  });
+
+  it("切换到新 Atlas 时清除搜索和倍率编辑状态", async () => {
+    const textures = new Map([["page.png", {} as ImageBitmap]]);
+    const view = render(<ExportPanel atlas={atlas} textures={textures} inferredScale={inferredScale} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索 Region" }), { target: { value: "very-long" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" }), { target: { value: "3" } });
+
+    view.rerender(<ExportPanel atlas={{ ...atlas, regions: [...atlas.regions] }} textures={textures} inferredScale={inferredScale} />);
+
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "搜索 Region" })).toHaveProperty("value", ""));
+    expect(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" })).toHaveProperty("value", "1");
+    expect(screen.getByText("body/head")).toBeTruthy();
   });
 });

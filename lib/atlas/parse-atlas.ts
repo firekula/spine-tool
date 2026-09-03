@@ -24,15 +24,24 @@ interface RegionDraft {
 
 /** A parse error that can be shown directly in the Chinese user interface. */
 export class AtlasParseError extends Error {
+  readonly pageName?: string;
+  readonly regionName?: string;
+
   constructor(
     public readonly code: string,
     public readonly line: number,
     public readonly suggestion: string,
-    public readonly regionName?: string,
+    context: { pageName?: string; regionName?: string } = {},
   ) {
-    const subject = regionName ? `Region「${regionName}」` : "Atlas";
+    const subject = context.regionName
+      ? `Region「${context.regionName}」`
+      : context.pageName
+        ? `纹理页「${context.pageName}」`
+        : "Atlas";
     super(`第 ${line} 行，${subject}：${atlasErrorText(code)}。建议：${suggestion}`);
     this.name = "AtlasParseError";
+    this.pageName = context.pageName;
+    this.regionName = context.regionName;
   }
 }
 
@@ -54,27 +63,30 @@ function attributeOf(line: string): Attribute | undefined {
   return { originalKey, normalizedKey: originalKey.toLowerCase(), value: match[2]!.trim() };
 }
 
-function numbers(value: string, count: number, line: number, regionName: string | undefined, field: string): number[] {
-  const values = value.split(",").map((part) => Number(part.trim()));
-  if (values.length !== count || values.some((number) => !Number.isFinite(number))) {
-    throw new AtlasParseError("INVALID_VALUE", line, `将 ${field} 写为 ${count} 个以逗号分隔的数字。`, regionName);
+type ErrorContext = { pageName?: string; regionName?: string };
+
+function numbers(value: string, count: number, line: number, context: ErrorContext, field: string): number[] {
+  const parts = value.split(",").map((part) => part.trim());
+  const values = parts.map(Number);
+  if (values.length !== count || parts.some((part) => part.length === 0) || values.some((number) => !Number.isFinite(number))) {
+    throw new AtlasParseError("INVALID_VALUE", line, `将 ${field} 写为 ${count} 个以逗号分隔的数字。`, context);
   }
   return values;
 }
 
-function positive(value: number, line: number, regionName: string | undefined): number {
+function positive(value: number, line: number, context: ErrorContext): number {
   if (value <= 0) {
-    throw new AtlasParseError("INVALID_SIZE", line, "将宽度和高度改为大于 0 的数字。", regionName);
+    throw new AtlasParseError("INVALID_SIZE", line, "将宽度和高度改为大于 0 的数字。", context);
   }
   return value;
 }
 
-function normalizeRotation(value: string, line: number, regionName: string): number {
+function normalizeRotation(value: string, line: number, context: ErrorContext): number {
   if (/^true$/i.test(value)) return 90;
   if (/^false$/i.test(value)) return 0;
   const rotation = Number(value);
   if (!Number.isFinite(rotation)) {
-    throw new AtlasParseError("INVALID_VALUE", line, "将 rotate 写为 true、false 或顺时针角度。", regionName);
+    throw new AtlasParseError("INVALID_VALUE", line, "将 rotate 写为 true、false 或顺时针角度。", context);
   }
   return ((rotation % 360) + 360) % 360;
 }
@@ -128,7 +140,7 @@ export function parseAtlas(text: string): AtlasDocument {
         "INCOMPLETE_REGION",
         region.line,
         `补齐 ${missing.join("、")} 字段后重试。`,
-        region.name,
+        { pageName: region.pageName, regionName: region.name },
       );
     }
     document.regions.push({
@@ -151,13 +163,13 @@ export function parseAtlas(text: string): AtlasDocument {
 
   const finishPage = (): void => {
     if (page && !pageHasSize) {
-      throw new AtlasParseError("MISSING_PAGE", pageLine, "在纹理页名称后添加 size: 宽, 高。", page.name);
+      throw new AtlasParseError("MISSING_PAGE", pageLine, "在纹理页名称后添加 size: 宽, 高。", { pageName: page.name });
     }
   };
 
   const beginPage = (name: string, line: number): void => {
     if (pageNames.has(name)) {
-      throw new AtlasParseError("DUPLICATE_PAGE", line, "为每个纹理页使用唯一的文件名。", name);
+      throw new AtlasParseError("DUPLICATE_PAGE", line, "为每个纹理页使用唯一的文件名。", { pageName: name });
     }
     pageNames.add(name);
     page = { name, width: 0, height: 0, custom: {} };
@@ -168,7 +180,7 @@ export function parseAtlas(text: string): AtlasDocument {
 
   const beginRegion = (name: string, line: number): void => {
     if (!page) {
-      throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称及其 size 字段。", name);
+      throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称及其 size 字段。", { regionName: name });
     }
     region = {
       name,
@@ -185,9 +197,10 @@ export function parseAtlas(text: string): AtlasDocument {
       throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称及其 size 字段。");
     }
     if (attribute.normalizedKey === "size") {
-      const [width, height] = numbers(attribute.value, 2, line, page.name, "size");
-      page.width = positive(width!, line, page.name);
-      page.height = positive(height!, line, page.name);
+      const context = { pageName: page.name };
+      const [width, height] = numbers(attribute.value, 2, line, context, "size");
+      page.width = positive(width!, line, context);
+      page.height = positive(height!, line, context);
       pageHasSize = true;
       return;
     }
@@ -196,54 +209,55 @@ export function parseAtlas(text: string): AtlasDocument {
 
   const setRegionAttribute = (attribute: Attribute, line: number): void => {
     if (!region) return;
+    const context = { pageName: region.pageName, regionName: region.name };
     switch (attribute.normalizedKey) {
       case "rotate":
-        region.rotation = normalizeRotation(attribute.value, line, region.name);
+        region.rotation = normalizeRotation(attribute.value, line, context);
         return;
       case "xy": {
-        const [x, y] = numbers(attribute.value, 2, line, region.name, "xy");
+        const [x, y] = numbers(attribute.value, 2, line, context, "xy");
         region.x = x;
         region.y = y;
         return;
       }
       case "size": {
-        const [width, height] = numbers(attribute.value, 2, line, region.name, "size");
-        region.packedWidth = positive(width!, line, region.name);
-        region.packedHeight = positive(height!, line, region.name);
+        const [width, height] = numbers(attribute.value, 2, line, context, "size");
+        region.packedWidth = positive(width!, line, context);
+        region.packedHeight = positive(height!, line, context);
         return;
       }
       case "bounds": {
-        const [x, y, width, height] = numbers(attribute.value, 4, line, region.name, "bounds");
+        const [x, y, width, height] = numbers(attribute.value, 4, line, context, "bounds");
         region.x = x;
         region.y = y;
-        region.packedWidth = positive(width!, line, region.name);
-        region.packedHeight = positive(height!, line, region.name);
+        region.packedWidth = positive(width!, line, context);
+        region.packedHeight = positive(height!, line, context);
         return;
       }
       case "orig": {
-        const [width, height] = numbers(attribute.value, 2, line, region.name, "orig");
-        region.originalWidth = positive(width!, line, region.name);
-        region.originalHeight = positive(height!, line, region.name);
+        const [width, height] = numbers(attribute.value, 2, line, context, "orig");
+        region.originalWidth = positive(width!, line, context);
+        region.originalHeight = positive(height!, line, context);
         return;
       }
       case "offset": {
-        const [left, bottom] = numbers(attribute.value, 2, line, region.name, "offset");
+        const [left, bottom] = numbers(attribute.value, 2, line, context, "offset");
         region.offsetLeft = left;
         region.offsetBottom = bottom;
         return;
       }
       case "offsets": {
-        const [left, bottom, width, height] = numbers(attribute.value, 4, line, region.name, "offsets");
+        const [left, bottom, width, height] = numbers(attribute.value, 4, line, context, "offsets");
         region.offsetLeft = left;
         region.offsetBottom = bottom;
-        region.originalWidth = positive(width!, line, region.name);
-        region.originalHeight = positive(height!, line, region.name);
+        region.originalWidth = positive(width!, line, context);
+        region.originalHeight = positive(height!, line, context);
         return;
       }
       case "index": {
-        const [index] = numbers(attribute.value, 1, line, region.name, "index");
+        const [index] = numbers(attribute.value, 1, line, context, "index");
         if (!Number.isInteger(index)) {
-          throw new AtlasParseError("INVALID_VALUE", line, "将 index 写为整数。", region.name);
+          throw new AtlasParseError("INVALID_VALUE", line, "将 index 写为整数。", context);
         }
         region.index = index!;
         return;
@@ -288,5 +302,8 @@ export function parseAtlas(text: string): AtlasDocument {
 
   finishRegion();
   finishPage();
+  if (document.pages.length === 0) {
+    throw new AtlasParseError("MISSING_PAGE", 1, "添加纹理页名称及 size: 宽, 高。");
+  }
   return document;
 }

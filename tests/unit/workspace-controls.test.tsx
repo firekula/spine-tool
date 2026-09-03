@@ -49,9 +49,30 @@ function fakeBridge(snapshot: Partial<PlaybackSnapshot> = {}): SpineRuntimeBridg
   };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("workspace controls", () => {
+  it("窄屏抽屉打开后移动焦点，关闭后归还给触发按钮", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    const user = userEvent.setup();
+    render(<WorkspaceShell bridge={fakeBridge()} metadata={metadata} />);
+
+    const trigger = screen.getByRole("button", { name: "控制面板" });
+    await user.click(trigger);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "关闭控制面板" }));
+
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(trigger);
+    vi.unstubAllGlobals();
+  });
+
   it("隐藏插槽在切换动画后仍然生效", async () => {
     const user = userEvent.setup();
     const bridge = fakeBridge();

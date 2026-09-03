@@ -5,6 +5,7 @@ import {
   type ImportBundle,
   ImportValidationError,
 } from "@/lib/files/import-files";
+import { getIssueMessage } from "@/lib/ui/messages";
 
 export interface ImportDropzoneProps {
   inputId?: string;
@@ -64,8 +65,9 @@ export function ImportDropzone({ inputId: suppliedInputId, disabled = false, onI
       await onImport(bundle);
     } catch (error) {
       const issue = asIssue(error);
+      const message = getIssueMessage(issue);
       setMissingPages(issue.code === "MISSING_TEXTURE_PAGES" ? issue.details ?? [] : []);
-      setErrorMessage(error instanceof Error ? error.message : "无法读取所选文件。");
+      setErrorMessage(`${message.title}：${message.action}`);
       onError?.(issue);
     } finally {
       importLockRef.current = false;

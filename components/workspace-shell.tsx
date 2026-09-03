@@ -15,19 +15,22 @@ import { PlaybackBar } from "@/components/playback-bar";
 import { PreviewCanvas } from "@/components/preview-canvas";
 import { SkinPanel } from "@/components/skin-panel";
 import { SlotPanel } from "@/components/slot-panel";
+import { StatusCenter } from "@/components/status-center";
 import type { ImportBundle } from "@/lib/files/import-files";
+import {
+  createRuntimeSession,
+  prepareImport,
+  type PreparedImport,
+  type RuntimeSession,
+} from "@/lib/files/import-workflow";
 import type { AppIssue } from "@/lib/issues/types";
-import { parseAtlas } from "@/lib/atlas/parse-atlas";
-import type { AtlasDocument } from "@/lib/atlas/types";
 import type {
   PlaybackSnapshot,
-  RuntimeLoadInput,
   SkeletonMetadata,
   SpineRuntimeBridge,
 } from "@/lib/spine/bridge-types";
-import { loadRuntimeModule } from "@/lib/spine/runtime-loader";
 import { inferExportScale, type ScaleInference } from "@/lib/spine/scale-inference";
-import { detectSpineVersion } from "@/lib/spine/version";
+import type { SupportedSpineVersion } from "@/lib/spine/version";
 import {
   createInitialWorkspaceState,
   workspaceReducer,
@@ -35,54 +38,32 @@ import {
 
 type ControlTab = "animation" | "skin" | "slot";
 
-interface PreviewSession {
-  bridge: SpineRuntimeBridge;
-  input: Omit<RuntimeLoadInput, "canvas">;
-}
-
-interface ExportResources {
-  atlas: AtlasDocument;
-  textures: Map<string, ImageBitmap>;
-}
-
 export interface WorkspaceShellProps {
   /** A preloaded bridge injection used by hosts and component tests. */
   bridge?: SpineRuntimeBridge;
   metadata?: SkeletonMetadata;
 }
 
-function issueFrom(error: unknown, code = "PREVIEW_LOAD_FAILED"): AppIssue {
+interface IssueFallback {
+  code: string;
+  severity: AppIssue["severity"];
+  subject: string;
+}
+
+function issueFrom(error: unknown, fallback: IssueFallback): AppIssue {
+  const structured = typeof error === "object" && error !== null && "code" in error
+    ? error as Partial<AppIssue> & { pageName?: string; regionName?: string }
+    : null;
+  const detail = error instanceof Error ? error.message : "处理所选文件时发生未知错误。";
+  const webglUnavailable = /不支持 WebGL|WebGL context/i.test(detail);
   return {
-    code,
-    severity: "error",
-    details: [error instanceof Error ? error.message : "无法加载 Spine 预览。"],
+    code: webglUnavailable ? "WEBGL_UNAVAILABLE" : structured?.code ?? fallback.code,
+    severity: fallback.severity,
+    subject: structured?.subject
+      ?? (structured?.regionName ? `Region「${structured.regionName}」` : structured?.pageName)
+      ?? fallback.subject,
+    details: structured?.details?.length ? structured.details : [detail],
   };
-}
-
-async function runtimeInput(bundle: ImportBundle): Promise<Omit<RuntimeLoadInput, "canvas">> {
-  const skeleton = bundle.skeletonKind === "json"
-    ? { kind: "json" as const, text: await bundle.skeletonFile.text() }
-    : { kind: "skel" as const, bytes: new Uint8Array(await bundle.skeletonFile.arrayBuffer()) };
-  return {
-    atlasText: bundle.atlasText,
-    skeleton,
-    textureObjectUrls: new Map(
-      Array.from(bundle.textureFiles, ([name, file]) => [name, URL.createObjectURL(file)]),
-    ),
-  };
-}
-
-async function exportResources(bundle: ImportBundle): Promise<ExportResources> {
-  const atlas = parseAtlas(bundle.atlasText);
-  const entries = await Promise.all(Array.from(bundle.textureFiles, async ([name, file]) => [
-    name,
-    await createImageBitmap(file),
-  ] as const));
-  return { atlas, textures: new Map(entries) };
-}
-
-function releaseTextures(resources: ExportResources | null): void {
-  resources?.textures.forEach((texture) => texture.close());
 }
 
 export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetadata }: WorkspaceShellProps = {}) {
@@ -92,14 +73,24 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const [narrowViewport, setNarrowViewport] = useState(false);
-  const [session, setSession] = useState<PreviewSession | null>(null);
+  const [session, setSession] = useState<RuntimeSession | null>(null);
   const [loadedMetadata, setLoadedMetadata] = useState<SkeletonMetadata | null>(null);
-  const [exportResourcesState, setExportResourcesState] = useState<ExportResources | null>(null);
+  const [prepared, setPrepared] = useState<PreparedImport | null>(null);
+  const [manualRuntimeRequired, setManualRuntimeRequired] = useState(false);
+  const [manualVersion, setManualVersion] = useState<SupportedSpineVersion>("4.2");
+  const sessionRef = useRef<RuntimeSession | null>(null);
+  const preparedRef = useRef<PreparedImport | null>(null);
+  const operationRef = useRef(0);
   const leftPanelRef = useRef<HTMLElement>(null);
   const rightPanelRef = useRef<HTMLElement>(null);
+  const leftDrawerTriggerRef = useRef<HTMLButtonElement>(null);
+  const rightDrawerTriggerRef = useRef<HTMLButtonElement>(null);
+  const leftDrawerCloseRef = useRef<HTMLButtonElement>(null);
+  const rightDrawerCloseRef = useRef<HTMLButtonElement>(null);
   const activeBridge = suppliedBridge ?? session?.bridge ?? null;
   const activeMetadata = suppliedMetadata ?? loadedMetadata;
   const ready = Boolean(activeBridge && activeMetadata && state.phase === "ready");
+  const exportResourcesState = prepared?.exportResources ?? null;
   const inferredScale = useMemo<ScaleInference>(() => {
     if (!exportResourcesState || !activeMetadata) return inferExportScale([]);
     const regionsByName = new Map(exportResourcesState.atlas.regions.map((region) => [region.name, region]));
@@ -125,22 +116,34 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     return () => query.removeEventListener("change", update);
   }, []);
 
-  useEffect(() => () => releaseTextures(exportResourcesState), [exportResourcesState]);
+  useEffect(() => () => {
+    operationRef.current += 1;
+    sessionRef.current?.release();
+    preparedRef.current?.exportResources.release();
+  }, []);
 
   useEffect(() => {
     leftPanelRef.current?.toggleAttribute("inert", narrowViewport && !leftDrawerOpen);
     rightPanelRef.current?.toggleAttribute("inert", narrowViewport && !rightDrawerOpen);
+    if (!narrowViewport) return;
+    if (leftDrawerOpen) leftDrawerCloseRef.current?.focus();
+    if (rightDrawerOpen) rightDrawerCloseRef.current?.focus();
   }, [leftDrawerOpen, narrowViewport, rightDrawerOpen]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      setLeftDrawerOpen(false);
-      setRightDrawerOpen(false);
+      if (rightDrawerOpen) {
+        setRightDrawerOpen(false);
+        queueMicrotask(() => rightDrawerTriggerRef.current?.focus());
+      } else if (leftDrawerOpen) {
+        setLeftDrawerOpen(false);
+        queueMicrotask(() => leftDrawerTriggerRef.current?.focus());
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, []);
+  }, [leftDrawerOpen, rightDrawerOpen]);
 
   useEffect(() => {
     if (!activeMetadata) return;
@@ -193,54 +196,146 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     dispatch({ type: "SYNC_PLAYBACK", snapshot });
   }, []);
 
+  const replaceSession = useCallback((next: RuntimeSession | null) => {
+    if (sessionRef.current !== next) sessionRef.current?.release();
+    sessionRef.current = next;
+    setSession(next);
+  }, []);
+
+  const replacePrepared = useCallback((next: PreparedImport | null) => {
+    if (preparedRef.current !== next) preparedRef.current?.exportResources.release();
+    preparedRef.current = next;
+    setPrepared(next);
+  }, []);
+
   const handleLoaded = useCallback((nextMetadata: SkeletonMetadata) => {
     setLoadedMetadata(nextMetadata);
-    setStatus("预览已就绪");
+    const version = sessionRef.current?.bridge.version;
+    setStatus(version ? `Spine ${version} · 预览已就绪` : "预览已就绪");
     dispatch({ type: "IMPORT_SUCCEEDED" });
   }, []);
 
   const handlePreviewError = useCallback((error: unknown) => {
-    const issue = issueFrom(error);
-    setStatus(`预览失败：${issue.details?.[0] ?? issue.code}`);
+    const bundle = preparedRef.current?.bundle;
+    const issue = issueFrom(error, {
+      code: bundle?.skeletonKind === "json" ? "INVALID_JSON" : "PREVIEW_LOAD_FAILED",
+      severity: "warning",
+      subject: bundle?.skeletonFile.name ?? "Spine 预览",
+    });
+    replaceSession(null);
+    setLoadedMetadata(null);
+    setStatus("预览不可用 · Atlas 仍可导出");
     dispatch({ type: "IMPORT_FAILED", issue });
-  }, []);
+  }, [replaceSession]);
+
+  const startRuntime = useCallback(async (bundle: ImportBundle, version: SupportedSpineVersion) => {
+    const operation = ++operationRef.current;
+    replaceSession(null);
+    setLoadedMetadata(null);
+    setStatus(`正在加载 Spine ${version} Runtime…`);
+    try {
+      const nextSession = await createRuntimeSession(bundle, version);
+      if (operation !== operationRef.current) {
+        nextSession.release();
+        return;
+      }
+      replaceSession(nextSession);
+      setStatus(`正在解析 Spine ${version} 骨骼…`);
+    } catch (error) {
+      if (operation !== operationRef.current) return;
+      const issue = issueFrom(error, {
+        code: "PREVIEW_LOAD_FAILED",
+        severity: "warning",
+        subject: bundle.skeletonFile.name,
+      });
+      setStatus("预览不可用 · Atlas 仍可导出");
+      dispatch({ type: "IMPORT_FAILED", issue });
+    }
+  }, [replaceSession]);
 
   const resetImport = () => {
     if (suppliedBridge) return;
+    operationRef.current += 1;
     dispatch({ type: "IMPORT_STARTED" });
-    setSession(null);
+    replaceSession(null);
+    replacePrepared(null);
     setLoadedMetadata(null);
-    setExportResourcesState(null);
+    setManualRuntimeRequired(false);
     setStatus("请选择新的文件");
   };
 
   const handleImport = async (bundle: ImportBundle) => {
+    const operation = ++operationRef.current;
     dispatch({ type: "IMPORT_STARTED" });
-    setSession(null);
+    replaceSession(null);
+    replacePrepared(null);
     setLoadedMetadata(null);
-    setExportResourcesState(null);
-    setStatus("正在识别 Runtime…");
+    setManualRuntimeRequired(false);
+    setStatus("正在解析 Atlas 与识别版本…");
     try {
-      const detected = await detectSpineVersion(bundle.skeletonFile);
-      if (!detected.majorMinor) {
-        throw new Error(detected.raw
-          ? `不支持 Spine ${detected.raw}`
-          : "无法识别 Spine 版本");
+      const nextPrepared = await prepareImport(bundle);
+      if (operation !== operationRef.current) {
+        nextPrepared.exportResources.release();
+        return;
       }
-      const module = await loadRuntimeModule(detected.majorMinor);
-      const input = await runtimeInput(bundle);
-      const nextExportResources = await exportResources(bundle);
-      setExportResourcesState(nextExportResources);
-      setSession({ bridge: module.createBridge(), input });
-      setStatus(`正在加载 Spine ${detected.majorMinor}…`);
+      replacePrepared(nextPrepared);
+
+      if (bundle.unusedTextures.length > 0) {
+        dispatch({
+          type: "REPORT_ISSUE",
+          issue: {
+            code: "UNUSED_TEXTURES",
+            severity: "warning",
+            subject: "额外 PNG",
+            details: bundle.unusedTextures,
+          },
+        });
+      }
+
+      if (!nextPrepared.detected.majorMinor) {
+        const code = nextPrepared.detected.raw
+          ? "UNSUPPORTED_SPINE_VERSION"
+          : bundle.skeletonKind === "skel"
+            ? "INVALID_SKEL_HEADER"
+            : "UNDETECTABLE_SPINE_VERSION";
+        setManualRuntimeRequired(true);
+        setStatus("Atlas 已就绪 · 请选择 Runtime 版本");
+        dispatch({
+          type: "IMPORT_FAILED",
+          issue: {
+            code,
+            severity: "warning",
+            subject: bundle.skeletonFile.name,
+            details: nextPrepared.detected.raw
+              ? [`检测到 Spine ${nextPrepared.detected.raw}`]
+              : ["没有找到可识别的版本信息。"],
+          },
+        });
+        return;
+      }
+
+      await startRuntime(bundle, nextPrepared.detected.majorMinor);
     } catch (error) {
-      handlePreviewError(error);
+      if (operation !== operationRef.current) return;
+      const issue = issueFrom(error, {
+        code: "IMPORT_FAILED",
+        severity: "error",
+        subject: bundle.atlasFile.name,
+      });
+      setStatus("导入失败 · 请修正后重新选择");
+      dispatch({ type: "IMPORT_FAILED", issue });
     }
   };
 
   const handleImportError = (issue: AppIssue) => {
-    setStatus(`导入失败：${issue.details?.[0] ?? issue.code}`);
-    dispatch({ type: "IMPORT_FAILED", issue });
+    operationRef.current += 1;
+    dispatch({ type: "IMPORT_STARTED" });
+    replaceSession(null);
+    replacePrepared(null);
+    setLoadedMetadata(null);
+    setManualRuntimeRequired(false);
+    setStatus("导入失败 · 请修正后重新选择");
+    dispatch({ type: "IMPORT_FAILED", issue: { ...issue, subject: issue.subject ?? "所选文件" } });
   };
 
   const metadataForControls: SkeletonMetadata = activeMetadata ?? {
@@ -268,10 +363,10 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
           <button type="button" className="button" onClick={resetImport} disabled={!activeBridge || Boolean(suppliedBridge)}>
             <RotateCcw size={18} aria-hidden="true" /> 重新导入
           </button>
-          <button type="button" className="button drawer-toggle" aria-expanded={leftDrawerOpen} aria-controls="workspace-controls" onClick={() => setLeftDrawerOpen((open) => !open)}>
+          <button ref={leftDrawerTriggerRef} type="button" className="button drawer-toggle" aria-expanded={leftDrawerOpen} aria-controls="workspace-controls" onClick={() => setLeftDrawerOpen((open) => !open)}>
             <PanelLeftOpen size={18} aria-hidden="true" /> 控制面板
           </button>
-          <button type="button" className="button drawer-toggle" aria-expanded={rightDrawerOpen} aria-controls="workspace-export" onClick={() => setRightDrawerOpen((open) => !open)}>
+          <button ref={rightDrawerTriggerRef} type="button" className="button drawer-toggle" aria-expanded={rightDrawerOpen} aria-controls="workspace-export" onClick={() => setRightDrawerOpen((open) => !open)}>
             <PanelRightOpen size={18} aria-hidden="true" /> 导出面板
           </button>
           <span className="status" role="status">{status}</span>
@@ -288,7 +383,10 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         <div className="panel-heading">
           <h2>控制</h2>
           <Settings2 size={18} aria-hidden="true" />
-          <button type="button" className="icon-button drawer-close" aria-label="关闭控制面板" onClick={() => setLeftDrawerOpen(false)}>
+          <button ref={leftDrawerCloseRef} type="button" className="icon-button drawer-close" aria-label="关闭控制面板" onClick={() => {
+            setLeftDrawerOpen(false);
+            queueMicrotask(() => leftDrawerTriggerRef.current?.focus());
+          }}>
             <X size={17} aria-hidden="true" />
           </button>
         </div>
@@ -319,17 +417,41 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         )}
       </aside>
 
-      <section className="preview-panel" aria-label="动画预览">
-        {activeBridge ? (
-          <PreviewCanvas bridge={activeBridge} metadata={activeMetadata} loadInput={suppliedBridge ? undefined : session?.input} onLoaded={handleLoaded} onLoadError={handlePreviewError} onSnapshot={handleSnapshot} />
-        ) : (
-          <div className="preview-empty">
-            <FileUp size={42} aria-hidden="true" />
-            <h2>尚未导入 Spine 文件</h2>
-            <p>选择 Atlas、JSON 或 SKEL 以及对应 PNG 纹理页，所有文件仅在本地处理。</p>
-            <ImportDropzone inputId="spine-import-files" onImport={handleImport} onError={handleImportError} />
-          </div>
-        )}
+      <section className={`preview-panel${state.warnings.length > 0 ? " has-issues" : ""}`} aria-label="动画预览">
+        <StatusCenter issues={state.warnings} />
+        <div className="preview-surface">
+          {activeBridge ? (
+            <PreviewCanvas bridge={activeBridge} metadata={activeMetadata} loadInput={suppliedBridge ? undefined : session?.input} onLoaded={handleLoaded} onLoadError={handlePreviewError} onSnapshot={handleSnapshot} />
+          ) : (
+            <div className="preview-empty">
+              <FileUp size={42} aria-hidden="true" />
+              <h2>{prepared ? "Atlas 已就绪，预览尚未可用" : "尚未导入 Spine 文件"}</h2>
+              <p>{prepared
+                ? "有效 Region 已保留在导出面板中；你可以继续导出，或重新选择完整文件。"
+                : "选择 Atlas、JSON 或 SKEL 以及对应 PNG 纹理页，所有文件仅在本地处理。"}</p>
+              {manualRuntimeRequired && prepared && (
+                <form className="manual-runtime" onSubmit={(event) => {
+                  event.preventDefault();
+                  void startRuntime(prepared.bundle, manualVersion);
+                }}>
+                  <h3>手动选择 Runtime</h3>
+                  <p>只在自动识别失败或版本超出支持范围时需要选择。</p>
+                  <label>
+                    Runtime 版本
+                    <select aria-label="Runtime 版本" value={manualVersion} onChange={(event) => setManualVersion(event.currentTarget.value as SupportedSpineVersion)}>
+                      <option value="3.8">Spine 3.8</option>
+                      <option value="4.0">Spine 4.0</option>
+                      <option value="4.1">Spine 4.1</option>
+                      <option value="4.2">Spine 4.2</option>
+                    </select>
+                  </label>
+                  <button type="submit" className="button">使用所选 Runtime 加载预览</button>
+                </form>
+              )}
+              <ImportDropzone inputId="spine-import-files" onImport={handleImport} onError={handleImportError} />
+            </div>
+          )}
+        </div>
       </section>
 
       <aside
@@ -342,7 +464,10 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         <div className="panel-heading">
           <h2>Atlas 导出</h2>
           <Download size={18} aria-hidden="true" />
-          <button type="button" className="icon-button drawer-close" aria-label="关闭导出面板" onClick={() => setRightDrawerOpen(false)}>
+          <button ref={rightDrawerCloseRef} type="button" className="icon-button drawer-close" aria-label="关闭导出面板" onClick={() => {
+            setRightDrawerOpen(false);
+            queueMicrotask(() => rightDrawerTriggerRef.current?.focus());
+          }}>
             <X size={17} aria-hidden="true" />
           </button>
         </div>
@@ -350,6 +475,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
           atlas={exportResourcesState?.atlas ?? null}
           textures={exportResourcesState?.textures ?? null}
           inferredScale={inferredScale}
+          onIssue={(issue) => dispatch({ type: "REPORT_ISSUE", issue })}
         />
       </aside>
 

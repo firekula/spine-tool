@@ -1,13 +1,15 @@
 import { Download, TriangleAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AtlasDocument } from "@/lib/atlas/types";
 import { exportAllRegions } from "@/lib/export/export-zip";
+import type { AppIssue } from "@/lib/issues/types";
 import type { ScaleInference } from "@/lib/spine/scale-inference";
 
 export interface ExportPanelProps {
   atlas: AtlasDocument | null;
   textures: Map<string, ImageBitmap> | null;
   inferredScale: ScaleInference;
+  onIssue?: (issue: AppIssue) => void;
 }
 
 function displayMultiplier(value: number): string {
@@ -31,12 +33,21 @@ function downloadZip(blob: Blob): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps) {
+export function ExportPanel({ atlas, textures, inferredScale, onIssue }: ExportPanelProps) {
   const [globalValue, setGlobalValue] = useState("1");
   const [overrideValues, setOverrideValues] = useState<Map<string, string>>(new Map());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [regionQuery, setRegionQuery] = useState("");
   const exporting = progress !== null;
+
+  useEffect(() => {
+    setGlobalValue("1");
+    setOverrideValues(new Map());
+    setNotice(null);
+    setRegionQuery("");
+  }, [atlas]);
+
   const globalMultiplier = Number(globalValue);
   const globalError = multiplierError(globalValue, false);
   const overrideErrors = useMemo(() => {
@@ -58,6 +69,12 @@ export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps
     }
     return values;
   }, [overrideValues]);
+  const filteredRegions = useMemo(() => {
+    const normalized = regionQuery.trim().toLocaleLowerCase();
+    return !atlas || !normalized
+      ? atlas?.regions ?? []
+      : atlas.regions.filter((region) => region.name.toLocaleLowerCase().includes(normalized));
+  }, [atlas, regionQuery]);
 
   const updateOverride = (key: string, value: string) => {
     setOverrideValues((current) => {
@@ -82,7 +99,9 @@ export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps
       downloadZip(blob);
       setNotice("ZIP 已生成；其中包含 PNG 和 export-report.json。请查看报告中的跳过或失败项。");
     } catch (error) {
-      setNotice(`导出失败：${error instanceof Error ? error.message : "无法生成 ZIP。"}`);
+      const detail = error instanceof Error ? error.message : "无法生成 ZIP。";
+      setNotice(`导出失败：${detail}`);
+      onIssue?.({ code: "ZIP_FAILED", severity: "error", subject: "spine-regions.zip", details: [detail] });
     } finally {
       setProgress(null);
     }
@@ -130,7 +149,17 @@ export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps
 
       <section className="export-region-list" aria-label="Region 单项倍率覆盖">
         <h3>Region（{atlas.regions.length}）</h3>
-        {atlas.regions.map((region) => {
+        <label className="visually-hidden" htmlFor="export-region-search">搜索 Region</label>
+        <input
+          id="export-region-search"
+          className="search-input"
+          type="search"
+          aria-label="搜索 Region"
+          value={regionQuery}
+          onChange={(event) => setRegionQuery(event.currentTarget.value)}
+          disabled={exporting}
+        />
+        {filteredRegions.map((region) => {
           const key = `${region.name}#${region.index}`;
           const error = overrideErrors.get(key);
           const errorId = `region-multiplier-${region.index}-error`;
@@ -154,6 +183,7 @@ export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps
             </label>
           );
         })}
+        {filteredRegions.length === 0 && <p className="empty-copy">没有匹配的 Region。</p>}
       </section>
 
       {progress && <p className="export-progress" role="status">已处理 {progress.done} / {progress.total}</p>}

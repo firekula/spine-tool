@@ -6,7 +6,6 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import type {
   PlaybackSnapshot,
@@ -161,13 +160,15 @@ export function PreviewCanvas({
     }));
   };
 
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+  const handleWheel = useCallback((event: WheelEvent) => {
     event.preventDefault();
-    const bounds = event.currentTarget.getBoundingClientRect();
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const bounds = viewport.getBoundingClientRect();
     const pointerX = event.clientX - bounds.left;
     const pointerY = event.clientY - bounds.top;
-    const viewportWidth = event.currentTarget.clientWidth;
-    const viewportHeight = event.currentTarget.clientHeight;
+    const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
     setView((current) => {
       if (event.deltaY === 0) return current;
       const factor = event.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
@@ -182,7 +183,14 @@ export function PreviewCanvas({
         centerY: worldY + screenY / zoom,
       };
     });
-  };
+  }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const key = event.key;
@@ -248,6 +256,9 @@ export function PreviewCanvas({
             <option value="dark">深色</option>
           </select>
         </label>
+        <output className="view-readout" aria-label="当前视图" aria-live="off">
+          {Math.round(view.zoom * 100)}% · x {Math.round(view.centerX)} · y {Math.round(view.centerY)}
+        </output>
       </div>
       <div
         ref={viewportRef}
@@ -260,7 +271,6 @@ export function PreviewCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={() => { dragRef.current = null; }}
         onPointerCancel={() => { dragRef.current = null; }}
-        onWheel={handleWheel}
         onKeyDown={handleKeyDown}
       >
         <canvas ref={canvasRef} aria-label="Spine 动画画布" />

@@ -21,6 +21,7 @@ export type WorkspaceAction =
   | { type: "IMPORT_STARTED" }
   | { type: "IMPORT_SUCCEEDED" }
   | { type: "IMPORT_FAILED"; issue: AppIssue }
+  | { type: "REPORT_ISSUE"; issue: AppIssue }
   | {
       type: "INITIALIZE_CONTROLS";
       animation: string | null;
@@ -76,6 +77,8 @@ export function workspaceReducer(
       return { ...state, phase: "ready" };
     case "IMPORT_FAILED":
       return { ...state, phase: "error", warnings: [...state.warnings, action.issue] };
+    case "REPORT_ISSUE":
+      return { ...state, warnings: [...state.warnings, action.issue] };
     case "INITIALIZE_CONTROLS":
       return {
         ...state,
