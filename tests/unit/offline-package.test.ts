@@ -66,15 +66,27 @@ describe("离线包脚本", () => {
       { js: 'const workerUrl = "https://example.invalid/worker.js"; new Worker(workerUrl);' },
       { js: 'importScripts("https://example.invalid/worker.js");' },
       { js: 'import("https://example.invalid/module.js");' },
+      { js: 'fetch("https:\\u002f\\u002fexample.invalid/escaped-fetch");' },
+      { js: 'import("https:\\x2f\\u{2f}example.invalid/escaped-import.js");' },
       { js: 'new EventSource("//example.invalid/events");' },
       { js: 'new WebSocket("wss://example.invalid/socket");' },
       { css: "body { background-image: url(//cdn.example.invalid/background.png); }" },
+      { css: "body { background-image: url(https:\\2f \\2f cdn.example.invalid/escaped-background.png); }" },
+      { css: String.raw`body { background-image: url(https:\/\/cdn.example.invalid/escaped-character-background.png); }` },
       { html: '<script src="https://example.invalid/app.js"></script>' },
+      { html: '<script src="https:&#47;&#47;example.invalid/escaped-app.js"></script>' },
+      { html: '<script src="https:&sol;&sol;example.invalid/named-entity-app.js"></script>' },
     ];
 
-    for (const overrides of maliciousBuilds) {
+    for (const [index, overrides] of maliciousBuilds.entries()) {
       const directory = makeOfflineBuild(overrides);
-      expect(() => packageFixture(directory, join(directory, "offline.zip"))).toThrow(/远程运行依赖/);
+      try {
+        packageFixture(directory, join(directory, "offline.zip"));
+      } catch (error) {
+        expect(error).toMatchObject({ message: expect.stringMatching(/远程运行依赖/) });
+        continue;
+      }
+      throw new Error(`恶意 fixture ${index} 未被拒绝`);
     }
   });
 });

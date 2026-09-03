@@ -33,13 +33,14 @@ test.beforeAll(async () => {
   for (const version of ["3_8", "4_0", "4_1", "4_2"]) {
     expect(filenames.some((name) => new RegExp(`^assets/runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(name))).toBe(true);
   }
+  expect(await offlineZip.file("index.html")!.async("string")).toContain("connect-src 'none'");
 
   const runtimeText = await Promise.all(filenames
     .filter((name) => /\.(?:html|js|css)$/.test(name))
     .map(async (name) => ({ name, text: await offlineZip.file(name)!.async("string") })));
   const remoteDependencies = runtimeText
     .flatMap(({ name, text }) => {
-      const matches = text.match(/(?:import\s*\(\s*|(?:src|href)\s*=\s*["']|@import\s+(?:url\()?\s*["'])(?:https?:)?\/\/[^"'\s)]+/g);
+      const matches = text.match(/(?:import\s*\(\s*|importScripts\s*\(\s*|(?:fetch|(?:window|self|globalThis)\s*\.\s*fetch)\s*\(\s*|new\s+(?:Worker|SharedWorker|WebSocket|EventSource)\s*\(\s*|\.\s*open\s*\(\s*["'][^"']*["']\s*,\s*|(?:src|href|srcset|action)\s*=\s*["']|@import\s+(?:url\()?\s*["']|url\(\s*["']?)(?:(?:https?:)?\/\/|wss:\/\/)[^"'\s)]+/g);
       return matches?.map((match) => `${name}: ${match}`) ?? [];
     });
   expect(remoteDependencies).toEqual([]);

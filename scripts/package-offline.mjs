@@ -13,6 +13,8 @@ const requiredLicense = "licenses/SPINE-RUNTIMES-LICENSE.txt";
 const requiredRuntimeChunks = ["3_8", "4_0", "4_1", "4_2"];
 const outputArchive = resolve(process.env.SPINE_OFFLINE_ARCHIVE ?? resolve(repositoryRoot, "spine-preview-export-offline.zip"));
 const execFileAsync = promisify(execFile);
+const maxAuditLength = 2 * 1024 * 1024;
+const maxCanonicalizationPasses = 8;
 const zipEntryOptions = {
   compression: "DEFLATE",
   compressionOptions: { level: 9 },
@@ -40,6 +42,56 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function codePoint(character) {
+  const value = Number.parseInt(character, 16);
+  if (!Number.isFinite(value) || value <= 0 || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) {
+    return "\ufffd";
+  }
+  return String.fromCodePoint(value);
+}
+
+function canonicalize(contents, decode, format) {
+  if (contents.length > maxAuditLength) throw new Error(`${format} 审计输入超过 ${maxAuditLength} 字符限制。`);
+  let canonical = contents;
+  for (let pass = 0; pass < maxCanonicalizationPasses; pass += 1) {
+    const decoded = decode(canonical);
+    if (decoded.length > maxAuditLength) throw new Error(`${format} 规范化结果超过 ${maxAuditLength} 字符限制。`);
+    if (decoded === canonical) return decoded;
+    canonical = decoded;
+  }
+  throw new Error(`${format} 规范化在 ${maxCanonicalizationPasses} 轮后仍未稳定，已拒绝打包。`);
+}
+
+function decodeJavaScriptEscapes(contents) {
+  return contents
+    .replace(/\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})/gi, (_match, braced, fixed, hex) => codePoint(braced ?? fixed ?? hex))
+    .replace(/\\\//g, "/");
+}
+
+const htmlNamedEntities = new Map([
+  ["amp", "&"],
+  ["apos", "'"],
+  ["colon", ":"],
+  ["newline", "\n"],
+  ["period", "."],
+  ["sol", "/"],
+  ["tab", "\t"],
+]);
+
+function decodeHtmlEntities(contents) {
+  return contents.replace(/&#(?:x([0-9a-f]+)|([0-9]+));?|&([a-z][a-z0-9]+);?/gi, (match, hex, decimal, named) => {
+    if (hex) return codePoint(hex);
+    if (decimal) return codePoint(Number.parseInt(decimal, 10).toString(16));
+    return htmlNamedEntities.get(named.toLowerCase()) ?? match;
+  });
+}
+
+function decodeCssEscapes(contents) {
+  return contents.replace(/\\([0-9a-f]{1,6})(?:\r\n|[\t\n\f\r ])?|\\([\s\S])/gi, (_match, hex, character) => (
+    hex ? codePoint(hex) : character
+  ));
+}
+
 async function filesRecursively(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
@@ -52,8 +104,15 @@ async function filesRecursively(directory) {
 
 function externalRuntimeDependencies(path, contents) {
   const occurrences = [];
+  const canonical = path.endsWith(".html")
+    ? canonicalize(contents, decodeHtmlEntities, "HTML")
+    : path.endsWith(".css")
+      ? canonicalize(contents, decodeCssEscapes, "CSS")
+      : path.endsWith(".js")
+        ? canonicalize(contents, decodeJavaScriptEscapes, "JavaScript")
+        : contents;
   const record = (pattern) => {
-    for (const match of contents.matchAll(pattern)) occurrences.push(`${path}: ${match[0]}`);
+    for (const match of canonical.matchAll(pattern)) occurrences.push(`${path}: ${match[0]}`);
   };
   if (path.endsWith(".html")) {
     record(/(?:src|href|srcset|action)\s*=\s*["'](?:https?:)?\/\//gi);
@@ -72,7 +131,7 @@ function externalRuntimeDependencies(path, contents) {
     record(/\b(?:navigator\s*\.\s*)?sendBeacon\s*\(\s*["'](?:https?:)?\/\//gi);
     record(/\.\s*(?:src|href)\s*=\s*["'](?:https?:)?\/\//gi);
 
-    for (const match of contents.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:new\s+URL\s*\(\s*)?["'](?:https?:)?\/\//gi)) {
+    for (const match of canonical.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:new\s+URL\s*\(\s*)?["'](?:https?:)?\/\//gi)) {
       const name = match[1];
       const reference = escapeRegExp(name);
       const externalBindingUse = new RegExp([
@@ -81,7 +140,7 @@ function externalRuntimeDependencies(path, contents) {
         `\\bnew\\s+(?:Worker|SharedWorker|WebSocket|EventSource)\\s*\\(\\s*${reference}\\b`,
         `\\.\\s*open\\s*\\(\\s*["'][^"']*["']\\s*,\\s*${reference}\\b`,
       ].join("|"), "i");
-      if (externalBindingUse.test(contents)) occurrences.push(`${path}: 外部 URL 变量 ${name}`);
+      if (externalBindingUse.test(canonical)) occurrences.push(`${path}: 外部 URL 变量 ${name}`);
     }
   }
   return occurrences;
