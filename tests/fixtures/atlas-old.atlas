@@ -1,0 +1,13 @@
+old-page.png
+size: 128, 128
+format: RGBA8888
+filter: Linear, Linear
+repeat: none
+
+old/trimmed
+  rotate: true
+  xy: 4, 8
+  size: 12, 20
+  orig: 32, 40
+  offset: 3, 5
+  index: -1

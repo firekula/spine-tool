@@ -1,0 +1,11 @@
+new-page.png
+size: 128, 128
+format: RGBA8888
+filter: Linear, Linear
+pma: true
+
+new/trimmed
+  rotate: 90
+  bounds: 4, 8, 12, 20
+  offsets: 3, 5, 32, 40
+  index: -1
