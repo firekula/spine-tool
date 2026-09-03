@@ -7,8 +7,9 @@ import {
   Settings2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AnimationPanel } from "@/components/animation-panel";
+import { ExportPanel } from "@/components/export-panel";
 import { ImportDropzone } from "@/components/import-dropzone";
 import { PlaybackBar } from "@/components/playback-bar";
 import { PreviewCanvas } from "@/components/preview-canvas";
@@ -16,6 +17,8 @@ import { SkinPanel } from "@/components/skin-panel";
 import { SlotPanel } from "@/components/slot-panel";
 import type { ImportBundle } from "@/lib/files/import-files";
 import type { AppIssue } from "@/lib/issues/types";
+import { parseAtlas } from "@/lib/atlas/parse-atlas";
+import type { AtlasDocument } from "@/lib/atlas/types";
 import type {
   PlaybackSnapshot,
   RuntimeLoadInput,
@@ -23,6 +26,7 @@ import type {
   SpineRuntimeBridge,
 } from "@/lib/spine/bridge-types";
 import { loadRuntimeModule } from "@/lib/spine/runtime-loader";
+import { inferExportScale, type ScaleInference } from "@/lib/spine/scale-inference";
 import { detectSpineVersion } from "@/lib/spine/version";
 import {
   createInitialWorkspaceState,
@@ -34,6 +38,11 @@ type ControlTab = "animation" | "skin" | "slot";
 interface PreviewSession {
   bridge: SpineRuntimeBridge;
   input: Omit<RuntimeLoadInput, "canvas">;
+}
+
+interface ExportResources {
+  atlas: AtlasDocument;
+  textures: Map<string, ImageBitmap>;
 }
 
 export interface WorkspaceShellProps {
@@ -63,6 +72,19 @@ async function runtimeInput(bundle: ImportBundle): Promise<Omit<RuntimeLoadInput
   };
 }
 
+async function exportResources(bundle: ImportBundle): Promise<ExportResources> {
+  const atlas = parseAtlas(bundle.atlasText);
+  const entries = await Promise.all(Array.from(bundle.textureFiles, async ([name, file]) => [
+    name,
+    await createImageBitmap(file),
+  ] as const));
+  return { atlas, textures: new Map(entries) };
+}
+
+function releaseTextures(resources: ExportResources | null): void {
+  resources?.textures.forEach((texture) => texture.close());
+}
+
 export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetadata }: WorkspaceShellProps = {}) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, createInitialWorkspaceState);
   const [status, setStatus] = useState(suppliedMetadata ? "预览已就绪" : "等待导入");
@@ -72,11 +94,27 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
   const [narrowViewport, setNarrowViewport] = useState(false);
   const [session, setSession] = useState<PreviewSession | null>(null);
   const [loadedMetadata, setLoadedMetadata] = useState<SkeletonMetadata | null>(null);
+  const [exportResourcesState, setExportResourcesState] = useState<ExportResources | null>(null);
   const leftPanelRef = useRef<HTMLElement>(null);
   const rightPanelRef = useRef<HTMLElement>(null);
   const activeBridge = suppliedBridge ?? session?.bridge ?? null;
   const activeMetadata = suppliedMetadata ?? loadedMetadata;
   const ready = Boolean(activeBridge && activeMetadata && state.phase === "ready");
+  const inferredScale = useMemo<ScaleInference>(() => {
+    if (!exportResourcesState || !activeMetadata) return inferExportScale([]);
+    const regionsByName = new Map(exportResourcesState.atlas.regions.map((region) => [region.name, region]));
+    return inferExportScale(activeMetadata.regionAttachments.flatMap((attachment) => {
+      const region = regionsByName.get(attachment.name);
+      if (!region) return [];
+      return [{
+        regionName: region.name,
+        atlasWidth: region.originalWidth,
+        atlasHeight: region.originalHeight,
+        attachmentWidth: attachment.width,
+        attachmentHeight: attachment.height,
+      }];
+    }));
+  }, [activeMetadata, exportResourcesState]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -86,6 +124,8 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
+
+  useEffect(() => () => releaseTextures(exportResourcesState), [exportResourcesState]);
 
   useEffect(() => {
     leftPanelRef.current?.toggleAttribute("inert", narrowViewport && !leftDrawerOpen);
@@ -170,6 +210,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     dispatch({ type: "IMPORT_STARTED" });
     setSession(null);
     setLoadedMetadata(null);
+    setExportResourcesState(null);
     setStatus("请选择新的文件");
   };
 
@@ -177,6 +218,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     dispatch({ type: "IMPORT_STARTED" });
     setSession(null);
     setLoadedMetadata(null);
+    setExportResourcesState(null);
     setStatus("正在识别 Runtime…");
     try {
       const detected = await detectSpineVersion(bundle.skeletonFile);
@@ -187,6 +229,8 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
       }
       const module = await loadRuntimeModule(detected.majorMinor);
       const input = await runtimeInput(bundle);
+      const nextExportResources = await exportResources(bundle);
+      setExportResourcesState(nextExportResources);
       setSession({ bridge: module.createBridge(), input });
       setStatus(`正在加载 Spine ${detected.majorMinor}…`);
     } catch (error) {
@@ -302,8 +346,11 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
             <X size={17} aria-hidden="true" />
           </button>
         </div>
-        <p className="empty-copy">导入后将在这里列出 Region 和恢复倍率。</p>
-        <button type="button" className="button" disabled><Download size={18} aria-hidden="true" /> 导出全部 ZIP</button>
+        <ExportPanel
+          atlas={exportResourcesState?.atlas ?? null}
+          textures={exportResourcesState?.textures ?? null}
+          inferredScale={inferredScale}
+        />
       </aside>
 
       <PlaybackBar
