@@ -45,6 +45,22 @@ describe("planRegionRestore", () => {
     expect(plan.destination).toEqual({ x: 3, y: 34.5, width: 30, height: 15 });
   });
 
+  it("按取整后输出的实际轴倍率统一缩放内容和透明边距", () => {
+    const plan = planRegionRestore(region({
+      packedWidth: 2,
+      packedHeight: 3,
+      originalWidth: 4,
+      originalHeight: 3,
+      offsetLeft: 1,
+      offsetBottom: 0,
+    }), 2 / 3);
+
+    expect(plan).toMatchObject({
+      output: { width: 3, height: 2 },
+      destination: { x: 0.75, y: 0, width: 1.5, height: 2 },
+    });
+  });
+
   it("拒绝超出纹理页边界的裁切矩形", () => {
     expect(() => planRegionRestore(region({ x: 45, packedWidth: 10 }), 1, { width: 50, height: 50 }))
       .toThrow("Region「hero」的裁切范围超出纹理页 page.png（50×50）");

@@ -15,6 +15,8 @@ export interface RegionRestorePlan {
   restoreMultiplier: number;
   crop: PixelRect;
   unrotated: PixelSize;
+  original: PixelSize;
+  placement: PixelRect;
   output: PixelSize;
   destination: PixelRect;
 }
@@ -76,6 +78,23 @@ export function planRegionRestore(
     fail(region, "的有效像素范围超出原始画布");
   }
 
+  const original = {
+    width: region.originalWidth,
+    height: region.originalHeight,
+  };
+  const placement = {
+    x: region.offsetLeft,
+    y: region.originalHeight - region.offsetBottom - unrotated.height,
+    width: unrotated.width,
+    height: unrotated.height,
+  };
+  const output = {
+    width: Math.max(1, Math.round(region.originalWidth * restoreMultiplier)),
+    height: Math.max(1, Math.round(region.originalHeight * restoreMultiplier)),
+  };
+  const outputScaleX = output.width / original.width;
+  const outputScaleY = output.height / original.height;
+
   return {
     rotation,
     restoreMultiplier,
@@ -86,15 +105,14 @@ export function planRegionRestore(
       height: region.packedHeight,
     },
     unrotated,
-    output: {
-      width: Math.max(1, Math.round(region.originalWidth * restoreMultiplier)),
-      height: Math.max(1, Math.round(region.originalHeight * restoreMultiplier)),
-    },
+    original,
+    placement,
+    output,
     destination: {
-      x: region.offsetLeft * restoreMultiplier,
-      y: (region.originalHeight - region.offsetBottom - unrotated.height) * restoreMultiplier,
-      width: unrotated.width * restoreMultiplier,
-      height: unrotated.height * restoreMultiplier,
+      x: placement.x * outputScaleX,
+      y: placement.y * outputScaleY,
+      width: placement.width * outputScaleX,
+      height: placement.height * outputScaleY,
     },
   };
 }

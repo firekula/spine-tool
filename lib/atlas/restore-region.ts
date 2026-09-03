@@ -79,17 +79,15 @@ export async function restoreRegion(input: RestoreRegionInput): Promise<Restored
     const unrotatedContext = context2d(unrotatedCanvas, region.name);
     drawUnrotated(unrotatedContext, cropped, plan);
 
+    const originalCanvas = canvas(plan.original.width, plan.original.height);
+    const originalContext = context2d(originalCanvas, region.name);
+    originalContext.drawImage(unrotatedCanvas, plan.placement.x, plan.placement.y);
+
     const outputCanvas = canvas(plan.output.width, plan.output.height);
     const outputContext = context2d(outputCanvas, region.name);
     outputContext.imageSmoothingEnabled = true;
     outputContext.imageSmoothingQuality = "high";
-    outputContext.drawImage(
-      unrotatedCanvas,
-      plan.destination.x,
-      plan.destination.y,
-      plan.destination.width,
-      plan.destination.height,
-    );
+    outputContext.drawImage(originalCanvas, 0, 0, plan.output.width, plan.output.height);
 
     return {
       blob: await pngBlob(outputCanvas, region.name),

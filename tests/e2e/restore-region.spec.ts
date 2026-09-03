@@ -164,3 +164,88 @@ test("用真实 Canvas 高质量缩放到恢复倍率对应的 PNG 尺寸", asyn
 
   expect(result).toEqual({ width: 4, height: 6 });
 });
+
+for (const fractionalCase of [
+  { restoreMultiplier: 4 / 3, expectedWidth: 5, expectedHeight: 4 },
+  { restoreMultiplier: 2 / 3, expectedWidth: 3, expectedHeight: 2 },
+]) {
+  test(`${fractionalCase.restoreMultiplier} 倍时把含透明边距的原始画布整体缩放`, async ({ page }) => {
+    await page.goto("/");
+
+    const result = await page.evaluate(async (fixture) => {
+      const modulePath = "/lib/atlas/restore-region.ts";
+      const { restoreRegion } = await import(modulePath);
+      const texture = document.createElement("canvas");
+      texture.width = 2;
+      texture.height = 1;
+      const textureContext = texture.getContext("2d");
+      if (!textureContext) throw new Error("缺少测试 Canvas 2D context");
+      textureContext.putImageData(new ImageData(new Uint8ClampedArray([
+        255, 0, 0, 255,
+        0, 0, 255, 255,
+      ]), 2, 1), 0, 0);
+      const sourcePng = await new Promise<Blob>((resolve, reject) => {
+        texture.toBlob((blob) => blob ? resolve(blob) : reject(new Error("测试 PNG 编码失败")), "image/png");
+      });
+      const texturePage = await createImageBitmap(sourcePng);
+      const restored = await restoreRegion({
+        region: {
+          name: "fractional",
+          pageName: "fractional.png",
+          index: -1,
+          x: 0,
+          y: 0,
+          packedWidth: 2,
+          packedHeight: 1,
+          originalWidth: 4,
+          originalHeight: 3,
+          offsetLeft: 1,
+          offsetBottom: 1,
+          rotation: 0,
+          custom: {},
+        },
+        texturePage,
+        restoreMultiplier: fixture.restoreMultiplier,
+      });
+      texturePage.close();
+
+      const actualBitmap = await createImageBitmap(restored.blob);
+      const actual = document.createElement("canvas");
+      actual.width = actualBitmap.width;
+      actual.height = actualBitmap.height;
+      const actualContext = actual.getContext("2d");
+      if (!actualContext) throw new Error("缺少输出 Canvas 2D context");
+      actualContext.drawImage(actualBitmap, 0, 0);
+      actualBitmap.close();
+
+      const original = document.createElement("canvas");
+      original.width = 4;
+      original.height = 3;
+      const originalContext = original.getContext("2d");
+      if (!originalContext) throw new Error("缺少参考 Canvas 2D context");
+      originalContext.putImageData(new ImageData(new Uint8ClampedArray([
+        255, 0, 0, 255,
+        0, 0, 255, 255,
+      ]), 2, 1), 1, 1);
+      const expected = document.createElement("canvas");
+      expected.width = fixture.expectedWidth;
+      expected.height = fixture.expectedHeight;
+      const expectedContext = expected.getContext("2d");
+      if (!expectedContext) throw new Error("缺少参考输出 Canvas 2D context");
+      expectedContext.imageSmoothingEnabled = true;
+      expectedContext.imageSmoothingQuality = "high";
+      expectedContext.drawImage(original, 0, 0, expected.width, expected.height);
+
+      return {
+        width: actual.width,
+        height: actual.height,
+        actualPixels: Array.from(actualContext.getImageData(0, 0, actual.width, actual.height).data),
+        expectedPixels: Array.from(expectedContext.getImageData(0, 0, expected.width, expected.height).data),
+      };
+    }, fractionalCase);
+
+    expect(result.width).toBe(fractionalCase.expectedWidth);
+    expect(result.height).toBe(fractionalCase.expectedHeight);
+    expect(result.actualPixels).toEqual(result.expectedPixels);
+  });
+}

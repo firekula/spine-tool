@@ -125,13 +125,32 @@ export function inferExportScale(samples: readonly AttachmentSizeSample[]): Scal
   const commonMultiplier = nearestCommonMultiplier(robustMultiplier);
   const restoreMultiplier = commonMultiplier ?? robustMultiplier;
 
+  for (const item of evidence) {
+    const resultError = Math.abs(item.multiplier - restoreMultiplier) / restoreMultiplier;
+    item.included = item.included && resultError <= CANDIDATE_ERROR_LIMIT + Number.EPSILON;
+  }
+  const supporting = evidence.filter(({ included }) => included);
+  const supportingWeight = supporting.reduce((sum, item) => sum + item.weight, 0);
+  const maximumSupportError = supporting.reduce(
+    (maximum, item) => Math.max(maximum, Math.abs(item.multiplier - restoreMultiplier) / restoreMultiplier),
+    0,
+  );
+
   if (commonMultiplier === undefined) {
     warnings.push("推算倍率与常见导出比例的相对误差超过 6%，请在导出前人工确认。");
   }
+  const unsupportedCount = included.length - supporting.length;
+  if (unsupportedCount > 0) {
+    warnings.push(`有 ${unsupportedCount} 个样本与最终恢复倍率相差超过 6%，未计入置信度。`);
+  }
 
-  const confidence = commonMultiplier !== undefined && included.length >= 2 && totalWeight >= 1.5
+  const confidence = commonMultiplier !== undefined
+    && supporting.length >= 2
+    && supportingWeight >= 1.5
+    && maximumSupportError <= ASPECT_RATIO_ERROR_LIMIT + Number.EPSILON
     ? "high"
-    : commonMultiplier !== undefined || included.length >= 2
+    : (commonMultiplier !== undefined && supporting.length >= 1)
+      || (commonMultiplier === undefined && supporting.length >= 2)
       ? "medium"
       : "low";
 
@@ -139,7 +158,7 @@ export function inferExportScale(samples: readonly AttachmentSizeSample[]): Scal
     restoreMultiplier,
     exportPercent: 100 / restoreMultiplier,
     confidence,
-    sampleCount: included.length,
+    sampleCount: supporting.length,
     evidence,
     warnings,
   };

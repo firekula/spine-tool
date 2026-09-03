@@ -72,6 +72,49 @@ describe("inferExportScale", () => {
     expect(result.warnings).toContain("已用中位数和 MAD 排除 1 个离群倍率样本。");
   });
 
+  it("不会把两个互相冲突的样本均值误判为高置信度候选", () => {
+    const result = inferExportScale([
+      { regionName: "one", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 100, attachmentHeight: 100 },
+      { regionName: "three", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 300, attachmentHeight: 300 },
+    ]);
+
+    expect(result).toMatchObject({
+      restoreMultiplier: 2,
+      confidence: "low",
+      sampleCount: 0,
+    });
+    expect(result.evidence).toEqual([
+      expect.objectContaining({ regionName: "one", included: false }),
+      expect.objectContaining({ regionName: "three", included: false }),
+    ]);
+  });
+
+  it("只用最终候选附近的样本支持置信度，不让对称离群组合冒充支持", () => {
+    const result = inferExportScale([
+      { regionName: "low", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 100, attachmentHeight: 100 },
+      { regionName: "near-a", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 200, attachmentHeight: 200 },
+      { regionName: "near-b", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 202, attachmentHeight: 202 },
+      { regionName: "high", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 300, attachmentHeight: 300 },
+    ]);
+
+    expect(result).toMatchObject({ restoreMultiplier: 2, confidence: "high", sampleCount: 2 });
+    expect(result.evidence).toEqual([
+      expect.objectContaining({ regionName: "low", included: false }),
+      expect.objectContaining({ regionName: "near-a", included: true }),
+      expect.objectContaining({ regionName: "near-b", included: true }),
+      expect.objectContaining({ regionName: "high", included: false }),
+    ]);
+  });
+
+  it("两个样本虽在候选 6% 内但离散超过 3% 时只给中置信度", () => {
+    const result = inferExportScale([
+      { regionName: "below", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 190, attachmentHeight: 190 },
+      { regionName: "above", atlasWidth: 100, atlasHeight: 100, attachmentWidth: 210, attachmentHeight: 210 },
+    ]);
+
+    expect(result).toMatchObject({ restoreMultiplier: 2, confidence: "medium", sampleCount: 2 });
+  });
+
   it("只在相对误差不超过 6% 时吸附到常见恢复倍率", () => {
     const boundaryMultiplier = (4 / 3) * 0.94;
     const outsideMultiplier = (4 / 3) * 0.9399;
