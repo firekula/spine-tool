@@ -47,6 +47,77 @@ describe("parseAtlas", () => {
     });
   });
 
+  it("将以页面专属属性或自定义属性开头的后续属性块识别为新页", () => {
+    const document = parseAtlas([
+      "page-a.png",
+      "size: 64, 64",
+      "",
+      "first",
+      "rotate: false",
+      "xy: 0, 0",
+      "size: 1, 1",
+      "orig: 1, 1",
+      "offset: 0, 0",
+      "",
+      "page-b.png",
+      "CustomPageFlag: enabled",
+      "format: RGBA8888",
+      "filter: Linear, Linear",
+      "repeat: none",
+      "pma: true",
+      "size: 32, 32",
+    ].join("\n"));
+
+    expect(document.pages.map((page) => page.name)).toEqual(["page-a.png", "page-b.png"]);
+    expect(document.pages[1]?.custom).toMatchObject({ CustomPageFlag: "enabled", format: "RGBA8888" });
+    expect(document.regions).toHaveLength(1);
+  });
+
+  it("将空行后先写 size 的 Region 属性块保留为 Region", () => {
+    const document = parseAtlas([
+      "page.png",
+      "size: 64, 64",
+      "",
+      "first",
+      "rotate: false",
+      "xy: 0, 0",
+      "size: 1, 1",
+      "orig: 1, 1",
+      "offset: 0, 0",
+      "",
+      "second",
+      "size: 3, 4",
+      "rotate: false",
+      "xy: 5, 6",
+      "orig: 3, 4",
+      "offset: 0, 0",
+    ].join("\n"));
+
+    expect(document.pages).toHaveLength(1);
+    expect(document.regions[1]).toMatchObject({ name: "second", x: 5, y: 6, packedWidth: 3, packedHeight: 4 });
+  });
+
+  it("按原始大小写保留未知 Page 与 Region 属性", () => {
+    const document = parseAtlas([
+      "page.png",
+      "PageFlag: one",
+      "pageflag: two",
+      "size: 64, 64",
+      "",
+      "region",
+      "RoTaTe: false",
+      "xy: 0, 0",
+      "size: 1, 1",
+      "orig: 1, 1",
+      "offset: 0, 0",
+      "Foo: one",
+      "foo: two",
+    ].join("\n"));
+
+    expect(document.pages[0]?.custom).toEqual({ PageFlag: "one", pageflag: "two" });
+    expect(document.regions[0]).toMatchObject({ rotation: 0, custom: { Foo: "one", foo: "two" } });
+  });
+
   it.each([
     ["缺少页面", "xy: 0, 0", "MISSING_PAGE", "第 1 行"],
     ["负尺寸", "page.png\nsize: 64, 64\n\nbad\nrotate: false\nxy: 0, 0\nsize: -1, 2\norig: 1, 2\noffset: 0, 0", "INVALID_SIZE", "bad"],

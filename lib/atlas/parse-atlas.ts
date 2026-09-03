@@ -1,6 +1,9 @@
 import type { AtlasDocument, AtlasPage, AtlasRegion } from "@/lib/atlas/types";
 
-type Attribute = { key: string; value: string };
+type Attribute = { originalKey: string; normalizedKey: string; value: string };
+
+const PAGE_ONLY_KEYS = new Set(["format", "filter", "repeat", "pma", "scale"]);
+const REGION_ONLY_KEYS = new Set(["rotate", "xy", "bounds", "orig", "offset", "offsets", "index", "split", "pad"]);
 
 interface RegionDraft {
   name: string;
@@ -47,7 +50,8 @@ function atlasErrorText(code: string): string {
 function attributeOf(line: string): Attribute | undefined {
   const match = line.match(/^\s*([^:]+):\s*(.*?)\s*$/);
   if (!match) return undefined;
-  return { key: match[1]!.trim().toLowerCase(), value: match[2]!.trim() };
+  const originalKey = match[1]!.trim();
+  return { originalKey, normalizedKey: originalKey.toLowerCase(), value: match[2]!.trim() };
 }
 
 function numbers(value: string, count: number, line: number, regionName: string | undefined, field: string): number[] {
@@ -75,14 +79,25 @@ function normalizeRotation(value: string, line: number, regionName: string): num
   return ((rotation % 360) + 360) % 360;
 }
 
-function nextPropertyIsPageSize(lines: string[], from: number): boolean {
+function classifyFollowingAttributeBlock(lines: string[], from: number): "page" | "region" {
+  let hasPageOnlyKey = false;
+  let hasRegionOnlyKey = false;
+
   for (let index = from + 1; index < lines.length; index += 1) {
     const next = lines[index] ?? "";
-    if (!next.trim()) return false;
+    if (!next.trim()) break;
     const attribute = attributeOf(next);
-    return attribute?.key === "size";
+    if (!attribute) break;
+    hasPageOnlyKey ||= PAGE_ONLY_KEYS.has(attribute.normalizedKey);
+    hasRegionOnlyKey ||= REGION_ONLY_KEYS.has(attribute.normalizedKey);
   }
-  return false;
+
+  // Region-only keys are decisive even when `size` is the first property.
+  // A page-only key proves the opposite. With no distinguishing key, retain
+  // Spine's normal page interpretation for a blank-separated header.
+  if (hasRegionOnlyKey) return "region";
+  if (hasPageOnlyKey) return "page";
+  return "page";
 }
 
 /**
@@ -169,22 +184,19 @@ export function parseAtlas(text: string): AtlasDocument {
     if (!page) {
       throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称及其 size 字段。");
     }
-    if (!pageHasSize && attribute.key !== "size") {
-      throw new AtlasParseError("MISSING_PAGE", line, "纹理页名称后第一项应为 size: 宽, 高。", page.name);
-    }
-    if (attribute.key === "size") {
+    if (attribute.normalizedKey === "size") {
       const [width, height] = numbers(attribute.value, 2, line, page.name, "size");
       page.width = positive(width!, line, page.name);
       page.height = positive(height!, line, page.name);
       pageHasSize = true;
       return;
     }
-    page.custom[attribute.key] = attribute.value;
+    page.custom[attribute.originalKey] = attribute.value;
   };
 
   const setRegionAttribute = (attribute: Attribute, line: number): void => {
     if (!region) return;
-    switch (attribute.key) {
+    switch (attribute.normalizedKey) {
       case "rotate":
         region.rotation = normalizeRotation(attribute.value, line, region.name);
         return;
@@ -237,7 +249,7 @@ export function parseAtlas(text: string): AtlasDocument {
         return;
       }
       default:
-        region.custom[attribute.key] = attribute.value;
+        region.custom[attribute.originalKey] = attribute.value;
     }
   };
 
@@ -263,7 +275,7 @@ export function parseAtlas(text: string): AtlasDocument {
     const name = rawLine.trim();
     if (!page) {
       beginPage(name, line);
-    } else if (afterBlank && nextPropertyIsPageSize(lines, index)) {
+    } else if (afterBlank && classifyFollowingAttributeBlock(lines, index) === "page") {
       finishRegion();
       finishPage();
       beginPage(name, line);
