@@ -1,4 +1,6 @@
 export interface AttachmentSizeSample {
+  /** Stable Atlas Region identity, normally `${name}#${index}`. */
+  regionKey?: string;
   regionName: string;
   atlasWidth: number;
   atlasHeight: number;
@@ -7,6 +9,7 @@ export interface AttachmentSizeSample {
 }
 
 export interface ScaleEvidence {
+  regionKey?: string;
   regionName: string;
   widthMultiplier: number;
   heightMultiplier: number;
@@ -16,12 +19,25 @@ export interface ScaleEvidence {
   included: boolean;
 }
 
+export interface AtlasPageScaleSample {
+  pageName: string;
+  scale: number;
+}
+
+export interface AtlasPageScaleEvidence {
+  pageName: string;
+  atlasScale: number;
+  restoreMultiplier: number;
+}
+
 export interface ScaleInference {
   restoreMultiplier: number;
   exportPercent: number;
   confidence: "high" | "medium" | "low";
   sampleCount: number;
   evidence: ScaleEvidence[];
+  pageEvidence?: AtlasPageScaleEvidence[];
+  requiresConfirmation?: boolean;
   warnings: string[];
 }
 
@@ -64,9 +80,26 @@ function keepByMad(value: number, center: number, mad: number): boolean {
   return (MAD_NORMALIZATION * deviation) / mad <= MAD_MODIFIED_Z_LIMIT;
 }
 
-export function inferExportScale(samples: readonly AttachmentSizeSample[]): ScaleInference {
+export function inferExportScale(
+  samples: readonly AttachmentSizeSample[],
+  pageScales: readonly AtlasPageScaleSample[] = [],
+): ScaleInference {
   const warnings: string[] = [];
-  const evidence = samples.flatMap<ScaleEvidence>((sample) => {
+  const samplesByRegion = new Map<string, AttachmentSizeSample>();
+  let duplicateCount = 0;
+  for (const sample of samples) {
+    const identity = sample.regionKey ?? sample.regionName;
+    if (samplesByRegion.has(identity)) {
+      duplicateCount += 1;
+      continue;
+    }
+    samplesByRegion.set(identity, sample);
+  }
+  if (duplicateCount > 0) {
+    warnings.push(`已按稳定 Region 身份去重 ${duplicateCount} 个重复附件样本。`);
+  }
+
+  const evidence = [...samplesByRegion.values()].flatMap<ScaleEvidence>((sample) => {
     const dimensions = [
       sample.atlasWidth,
       sample.atlasHeight,
@@ -88,6 +121,7 @@ export function inferExportScale(samples: readonly AttachmentSizeSample[]): Scal
     }
 
     return [{
+      regionKey: sample.regionKey,
       regionName: sample.regionName,
       widthMultiplier,
       heightMultiplier,
@@ -98,6 +132,51 @@ export function inferExportScale(samples: readonly AttachmentSizeSample[]): Scal
     }];
   });
 
+  const pageEvidence = pageScales.flatMap<AtlasPageScaleEvidence>((sample) => (
+    isPositiveFinite(sample.scale)
+      ? [{
+          pageName: sample.pageName,
+          atlasScale: sample.scale,
+          restoreMultiplier: 1 / sample.scale,
+        }]
+      : []
+  ));
+  if (pageEvidence.length > 0) {
+    const firstMultiplier = pageEvidence[0]!.restoreMultiplier;
+    const conflict = pageEvidence.some(({ restoreMultiplier }) => (
+      Math.abs(restoreMultiplier - firstMultiplier) / firstMultiplier > Number.EPSILON * 16
+    ));
+    if (conflict) {
+      const details = pageEvidence
+        .map(({ pageName, atlasScale, restoreMultiplier }) => (
+          `「${pageName}」scale ${atlasScale}（恢复 ${Number(restoreMultiplier.toPrecision(12))} 倍）`
+        ))
+        .join("、");
+      warnings.push(`Atlas 多页 scale 冲突：${details}。请核对并确认手动恢复倍率后再导出。`);
+      return {
+        restoreMultiplier: 1,
+        exportPercent: 100,
+        confidence: "low",
+        sampleCount: pageEvidence.length,
+        evidence,
+        pageEvidence,
+        requiresConfirmation: true,
+        warnings,
+      };
+    }
+
+    return {
+      restoreMultiplier: firstMultiplier,
+      exportPercent: 100 / firstMultiplier,
+      confidence: "high",
+      sampleCount: pageEvidence.length,
+      evidence,
+      pageEvidence,
+      requiresConfirmation: false,
+      warnings,
+    };
+  }
+
   if (evidence.length === 0) {
     return {
       restoreMultiplier: 1,
@@ -105,6 +184,8 @@ export function inferExportScale(samples: readonly AttachmentSizeSample[]): Scal
       confidence: "low",
       sampleCount: 0,
       evidence: [],
+      pageEvidence: [],
+      requiresConfirmation: false,
       warnings: ["没有可用于推算导出倍率的有效 Region 附件尺寸，已保持 1 倍。"],
     };
   }
@@ -160,6 +241,8 @@ export function inferExportScale(samples: readonly AttachmentSizeSample[]): Scal
     confidence,
     sampleCount: supporting.length,
     evidence,
+    pageEvidence: [],
+    requiresConfirmation: false,
     warnings,
   };
 }

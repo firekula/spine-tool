@@ -45,6 +45,19 @@ function bridge(): SpineRuntimeBridge {
 }
 
 describe("import workflow resources", () => {
+  it("把 Spine 3.8 的明确 Alpha 选择写入 Runtime load input", async () => {
+    const runtimeBridge = bridge();
+    const session = await createRuntimeSession(bundle(), "3.8", {
+      alphaMode: "premultiplied",
+      loadModule: async () => ({ createBridge: () => runtimeBridge } as SpineRuntimeModule),
+      createObjectUrl: () => "blob:pma",
+      revokeObjectUrl: vi.fn(),
+    });
+
+    expect(session.input.alphaMode).toBe("premultiplied");
+    session.release();
+  });
+
   it("按 Atlas 解析、版本检测、PNG 解码顺序准备可导出资源", async () => {
     const order: string[] = [];
     const bitmap = { width: 1, height: 1, close: vi.fn() } as unknown as ImageBitmap;

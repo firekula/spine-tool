@@ -22,6 +22,10 @@ async function importOfficialFixture(
   kind: "json" | "skel",
 ): Promise<void> {
   await page.locator('input[type="file"]').setInputFiles(fixtureFiles(version, kind));
+  if (version === "3.8") {
+    await expect(page.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toBeChecked();
+    await page.getByRole("button", { name: "确认 Alpha 模式并加载预览" }).click();
+  }
 }
 
 for (const version of versions) {

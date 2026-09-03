@@ -6,6 +6,7 @@ import type {
   RuntimeLoadInput,
   SpineRuntimeBridge,
   SpineRuntimeModule,
+  TextureAlphaMode,
 } from "@/lib/spine/bridge-types";
 import { loadRuntimeModule } from "@/lib/spine/runtime-loader";
 import {
@@ -56,9 +57,18 @@ interface PrepareImportDependencies {
 }
 
 interface RuntimeSessionDependencies {
+  alphaMode?: TextureAlphaMode;
   loadModule?: (version: SupportedSpineVersion) => Promise<SpineRuntimeModule>;
   createObjectUrl?: (file: File) => string;
   revokeObjectUrl?: (url: string) => void;
+}
+
+/** A filename hint only; the 3.8 UI still requires the user to confirm. */
+export function suggestSpine38AlphaMode(bundle: ImportBundle): TextureAlphaMode {
+  const names = [bundle.atlasFile.name, ...bundle.textureFiles.keys()];
+  return names.some((name) => /(?:^|[._-])pma(?:[._-]|$)/i.test(name))
+    ? "premultiplied"
+    : "straight";
 }
 
 function releasableExportResources(
@@ -170,6 +180,7 @@ export async function createRuntimeSession(
         atlasText: bundle.atlasText,
         skeleton,
         textureObjectUrls: objectUrls,
+        alphaMode: dependencies.alphaMode,
       },
       release,
     };

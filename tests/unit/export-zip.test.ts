@@ -118,6 +118,28 @@ describe("exportAllRegions", () => {
     expect(new Set(report.regions.map((entry: { zipPath: string }) => entry.zipPath)).size).toBe(3);
   });
 
+  it("导出查找纹理时使用规范化 Atlas 页面身份", async () => {
+    mocks.restoreRegion.mockReset();
+    mocks.restoreRegion.mockResolvedValue({
+      blob: new Blob(["png"], { type: "image/png" }), width: 20, height: 24, plan: {},
+    });
+    const normalizedAtlas: AtlasDocument = {
+      pages: [{ ...atlas.pages[0]!, name: "page.png" }],
+      regions: [{ ...atlas.regions[0]!, pageName: ".\\./page.png" }],
+    };
+
+    const result = await exportAllRegions({
+      atlas: normalizedAtlas,
+      textures: new Map([["page.png", {} as ImageBitmap]]),
+      inferredScale,
+      globalMultiplier: 1,
+      regionOverrides: new Map(),
+    }, vi.fn());
+
+    expect(result.report.summary.successful).toBe(1);
+    expect(result.report.regions[0]).toMatchObject({ sourceTexturePage: "page.png", status: "success" });
+  });
+
   it("取消后不再恢复下一项，也不返回残缺 ZIP", async () => {
     mocks.restoreRegion.mockReset();
     mocks.restoreRegion.mockResolvedValue({

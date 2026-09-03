@@ -1,4 +1,5 @@
 import type { AppIssue } from "@/lib/issues/types";
+import { normalizeAtlasPageName } from "@/lib/atlas/page-name";
 
 export interface ImportBundle {
   atlasFile: File;
@@ -25,10 +26,6 @@ export class ImportValidationError extends Error implements AppIssue {
 interface NamedFile {
   file: File;
   name: string;
-}
-
-function normalizedName(name: string): string {
-  return name.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
 function basename(name: string): string {
@@ -82,7 +79,7 @@ export function extractAtlasPageNames(atlasText: string): string[] {
     }
 
     if (pageHeader) {
-      pages.push(normalizedName(candidate));
+      pages.push(normalizeAtlasPageName(candidate));
       hasPage = true;
     }
     afterBlank = false;
@@ -116,7 +113,7 @@ function resolveTexture(pageName: string, textures: NamedFile[]): NamedFile {
 }
 
 export async function classifyImport(files: File[]): Promise<ImportBundle> {
-  const namedFiles = files.map((file) => ({ file, name: normalizedName(file.name) }));
+  const namedFiles = files.map((file) => ({ file, name: normalizeAtlasPageName(file.name) }));
   const atlasFile = requireSingleFile(
     namedFiles.filter(({ name }) => extension(name) === "atlas").map(({ file }) => file),
     "Atlas",
@@ -138,7 +135,13 @@ export async function classifyImport(files: File[]): Promise<ImportBundle> {
   const usedTextures = new Set<File>();
   const missingPages: string[] = [];
 
-  for (const pageName of extractAtlasPageNames(atlasText)) {
+  const pageNames = extractAtlasPageNames(atlasText);
+  const seenPageNames = new Set<string>();
+  for (const pageName of pageNames) {
+    if (seenPageNames.has(pageName)) {
+      throw new ImportValidationError("AMBIGUOUS_TEXTURE_PAGE", [pageName]);
+    }
+    seenPageNames.add(pageName);
     try {
       const texture = resolveTexture(pageName, textures);
       textureFiles.set(pageName, texture.file);

@@ -1,4 +1,5 @@
 import type { AtlasDocument, AtlasPage, AtlasRegion } from "@/lib/atlas/types";
+import { normalizeAtlasPageName } from "@/lib/atlas/page-name";
 
 type Attribute = { originalKey: string; normalizedKey: string; value: string };
 
@@ -183,11 +184,12 @@ export function parseAtlas(text: string): AtlasDocument {
   };
 
   const beginPage = (name: string, line: number): void => {
-    if (pageNames.has(name)) {
-      throw new AtlasParseError("DUPLICATE_PAGE", line, "为每个纹理页使用唯一的文件名。", { pageName: name });
+    const normalizedName = normalizeAtlasPageName(name);
+    if (pageNames.has(normalizedName)) {
+      throw new AtlasParseError("DUPLICATE_PAGE", line, "为每个纹理页使用唯一的文件名。", { pageName: normalizedName });
     }
-    pageNames.add(name);
-    page = { name, width: 0, height: 0, custom: {} };
+    pageNames.add(normalizedName);
+    page = { name: normalizedName, width: 0, height: 0, custom: {} };
     pageLine = line;
     pageHasSize = false;
     document.pages.push(page);
@@ -217,6 +219,12 @@ export function parseAtlas(text: string): AtlasDocument {
       page.width = positive(width!, line, context);
       page.height = positive(height!, line, context);
       pageHasSize = true;
+      return;
+    }
+    if (attribute.normalizedKey === "scale") {
+      const context = { pageName: page.name };
+      const [scale] = numbers(attribute.value, 1, line, context, "scale");
+      page.scale = positive(scale!, line, context);
       return;
     }
     page.custom[attribute.originalKey] = attribute.value;

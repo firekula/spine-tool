@@ -4,11 +4,15 @@ export type RuntimeSkeletonInput =
   | { kind: "json"; text: string }
   | { kind: "skel"; bytes: Uint8Array };
 
+export type TextureAlphaMode = "premultiplied" | "straight";
+
 export interface RuntimeLoadInput {
   atlasText: string;
   skeleton: RuntimeSkeletonInput;
   textureObjectUrls: ReadonlyMap<string, string>;
   canvas: HTMLCanvasElement;
+  /** Required by Spine 3.8, whose Atlas format may omit the page-level pma field. */
+  alphaMode?: TextureAlphaMode;
 }
 
 export interface SkeletonAnimationMetadata {

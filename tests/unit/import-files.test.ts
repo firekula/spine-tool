@@ -101,6 +101,30 @@ describe("classifyImport", () => {
     expect(bundle.textureFiles.get("textures/page-a.png")).toBe(files[2]);
   });
 
+  it("用同一规则移除多个开头 ./ 段并建立规范化纹理键", async () => {
+    const files = [
+      file("hero.atlas", ".\\./textures\\page-a.png\nsize: 16,16"),
+      file("hero.json", "{}"),
+      png("textures/page-a.png"),
+    ];
+
+    const bundle = await classifyImport(files);
+
+    expect([...bundle.textureFiles.keys()]).toEqual(["textures/page-a.png"]);
+    expect(bundle.textureFiles.get("textures/page-a.png")).toBe(files[2]);
+  });
+
+  it("拒绝规范化后指向同一身份的 Atlas 页面声明", async () => {
+    await expect(classifyImport([
+      file("hero.atlas", "page.png\nsize: 16,16\n\n./page.png\nsize: 16,16"),
+      file("hero.json", "{}"),
+      png("page.png"),
+    ])).rejects.toMatchObject({
+      code: "AMBIGUOUS_TEXTURE_PAGE",
+      details: ["page.png"],
+    });
+  });
+
   it("拒绝 basename 匹配歧义而不猜测纹理", async () => {
     const files = [
       file("hero.atlas", "textures/page-a.png\nsize: 16,16"),

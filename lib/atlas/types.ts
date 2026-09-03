@@ -3,6 +3,8 @@ export interface AtlasPage {
   name: string;
   width: number;
   height: number;
+  /** Texture export scale written by Spine, for example 0.5 for a 50% atlas. */
+  scale?: number;
   custom: Record<string, string>;
 }
 

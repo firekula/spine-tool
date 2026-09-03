@@ -38,6 +38,7 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [regionQuery, setRegionQuery] = useState("");
+  const [scaleConflictConfirmed, setScaleConflictConfirmed] = useState(false);
   const mountedRef = useRef(false);
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -66,6 +67,7 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
     setProgress(null);
     setNotice(null);
     setRegionQuery("");
+    setScaleConflictConfirmed(false);
   }, [cancelCurrentExport, resources]);
 
   const globalMultiplier = Number(globalValue);
@@ -79,7 +81,15 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
     return errors;
   }, [overrideValues]);
   const finalMultiplier = globalError ? null : inferredScale.restoreMultiplier * globalMultiplier;
-  const canExport = Boolean(atlas && textures && !globalError && overrideErrors.size === 0 && !exporting);
+  const requiresScaleConfirmation = Boolean(inferredScale.requiresConfirmation);
+  const canExport = Boolean(
+    atlas
+    && textures
+    && !globalError
+    && overrideErrors.size === 0
+    && !exporting
+    && (!requiresScaleConfirmation || scaleConflictConfirmed),
+  );
   const overrides = useMemo(() => {
     const values = new Map<string, number>();
     for (const [key, value] of overrideValues) {
@@ -165,6 +175,11 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
         {inferredScale.evidence.length > 0 && (
           <p className="export-evidence">依据：{inferredScale.evidence.filter((item) => item.included).map((item) => item.regionName).join("、") || "没有一致样本"}</p>
         )}
+        {(inferredScale.pageEvidence?.length ?? 0) > 0 && (
+          <p className="export-evidence">Atlas 页：{inferredScale.pageEvidence!.map((item) => (
+            `${item.pageName}（scale ${displayMultiplier(item.atlasScale)} → 恢复 ${displayMultiplier(item.restoreMultiplier)} 倍）`
+          )).join("、")}</p>
+        )}
         {inferredScale.confidence === "low" && (
           <p className="export-warning"><TriangleAlert size={16} aria-hidden="true" /> 自动倍率置信度低；请核对后明确点击导出。</p>
         )}
@@ -179,11 +194,26 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
           value={globalValue}
           aria-invalid={Boolean(globalError)}
           aria-describedby={globalError ? "global-multiplier-error" : undefined}
-          onChange={(event) => setGlobalValue(event.target.value)}
+          onChange={(event) => {
+            setGlobalValue(event.target.value);
+            if (requiresScaleConfirmation) setScaleConflictConfirmed(false);
+          }}
           disabled={exporting}
         />
         {globalError && <span className="export-field-error" id="global-multiplier-error">全局倍率必须是大于 0 的有限数值。</span>}
       </label>
+
+      {requiresScaleConfirmation && (
+        <label className="check-row export-scale-confirmation">
+          <input
+            type="checkbox"
+            checked={scaleConflictConfirmed}
+            onChange={(event) => setScaleConflictConfirmed(event.currentTarget.checked)}
+            disabled={exporting}
+          />
+          我已核对冲突页面并确认使用上述手动倍率
+        </label>
+      )}
 
       <section className="export-region-list" aria-label="Region 单项倍率覆盖">
         <h3>Region（{atlas.regions.length}）</h3>
@@ -227,7 +257,13 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
       {progress && <p className="export-progress" role="status">已处理 {progress.done} / {progress.total}</p>}
       {notice && <p className="export-notice" role="status">{notice}</p>}
       <button type="button" className="button button-primary" disabled={!canExport} onClick={startExport}>
-        <Download size={18} aria-hidden="true" /> {exporting ? "正在导出 ZIP" : inferredScale.confidence === "low" ? "仍要导出全部 ZIP" : "导出全部 ZIP"}
+        <Download size={18} aria-hidden="true" /> {exporting
+          ? "正在导出 ZIP"
+          : requiresScaleConfirmation
+            ? "确认倍率后导出全部 ZIP"
+            : inferredScale.confidence === "low"
+              ? "仍要导出全部 ZIP"
+              : "导出全部 ZIP"}
       </button>
     </div>
   );

@@ -2,6 +2,78 @@ import { describe, expect, it } from "vitest";
 import { inferExportScale } from "@/lib/spine/scale-inference";
 
 describe("inferExportScale", () => {
+  it.each([
+    { scale: 0.5, restoreMultiplier: 2, exportPercent: 50 },
+    { scale: 1, restoreMultiplier: 1, exportPercent: 100 },
+    { scale: 2, restoreMultiplier: 0.5, exportPercent: 200 },
+  ])("Atlas-only page scale $scale 是直接高置信证据", ({ scale, restoreMultiplier, exportPercent }) => {
+    const result = inferExportScale([], [{ pageName: "page.png", scale }]);
+
+    expect(result).toMatchObject({
+      restoreMultiplier,
+      exportPercent,
+      confidence: "high",
+      sampleCount: 1,
+      requiresConfirmation: false,
+      pageEvidence: [{ pageName: "page.png", atlasScale: scale, restoreMultiplier }],
+    });
+  });
+
+  it("直接 page scale 优先于尺寸附件推断", () => {
+    const result = inferExportScale([{
+      regionName: "attachment",
+      atlasWidth: 100,
+      atlasHeight: 100,
+      attachmentWidth: 100,
+      attachmentHeight: 100,
+    }], [{ pageName: "page.png", scale: 0.5 }]);
+
+    expect(result).toMatchObject({ restoreMultiplier: 2, confidence: "high" });
+  });
+
+  it("多页 scale 冲突时不静默选择高置信倍率", () => {
+    const result = inferExportScale([], [
+      { pageName: "half.png", scale: 0.5 },
+      { pageName: "full.png", scale: 1 },
+    ]);
+
+    expect(result).toMatchObject({
+      restoreMultiplier: 1,
+      exportPercent: 100,
+      confidence: "low",
+      requiresConfirmation: true,
+      sampleCount: 2,
+    });
+    expect(result.warnings.join("\n")).toContain("half.png");
+    expect(result.warnings.join("\n")).toContain("full.png");
+    expect(result.warnings.join("\n")).toContain("冲突");
+  });
+
+  it("按稳定 Region 身份去重多皮肤附件，避免虚增置信度", () => {
+    const result = inferExportScale([
+      {
+        regionKey: "body#-1",
+        regionName: "body",
+        atlasWidth: 50,
+        atlasHeight: 50,
+        attachmentWidth: 100,
+        attachmentHeight: 100,
+      },
+      {
+        regionKey: "body#-1",
+        regionName: "body",
+        atlasWidth: 50,
+        atlasHeight: 50,
+        attachmentWidth: 100,
+        attachmentHeight: 100,
+      },
+    ]);
+
+    expect(result).toMatchObject({ restoreMultiplier: 2, confidence: "medium", sampleCount: 1 });
+    expect(result.evidence).toHaveLength(1);
+    expect(result.warnings).toContain("已按稳定 Region 身份去重 1 个重复附件样本。");
+  });
+
   it("把一组接近 2 倍的附件证据归一为 50% 导出的恢复倍率", () => {
     const result = inferExportScale([
       {

@@ -90,6 +90,51 @@ describe("ExportPanel", () => {
     expect(screen.getByText("2 × 1.25 = 2.5 倍")).toBeTruthy();
   });
 
+  it("page scale 冲突时要求用户确认手动倍率后才允许导出", async () => {
+    const conflict: ScaleInference = {
+      ...inferredScale,
+      restoreMultiplier: 1,
+      exportPercent: 100,
+      confidence: "low",
+      requiresConfirmation: true,
+      pageEvidence: [
+        { pageName: "half.png", atlasScale: 0.5, restoreMultiplier: 2 },
+        { pageName: "full.png", atlasScale: 1, restoreMultiplier: 1 },
+      ],
+      warnings: ["Atlas 多页 scale 冲突，请手动确认恢复倍率。"],
+    };
+    mocks.exportAllRegions.mockResolvedValueOnce({
+      blob: new Blob(["zip"]),
+      report: {
+        version: 1,
+        inferredScale: conflict,
+        summary: { successful: 0, skipped: 0, failed: 0, total: 0 },
+        regions: [],
+      },
+      issues: [],
+    } satisfies ExportAllResult);
+    render(<ExportPanel resources={resources(atlas)} inferredScale={conflict} />);
+
+    const button = screen.getByRole("button", { name: "确认倍率后导出全部 ZIP" });
+    expect(button).toHaveProperty("disabled", true);
+    fireEvent.change(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" }), { target: { value: "2" } });
+    const confirmation = screen.getByRole("checkbox", { name: "我已核对冲突页面并确认使用上述手动倍率" });
+    await userEvent.setup().click(confirmation);
+    expect(button).toHaveProperty("disabled", false);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" }), { target: { value: "3" } });
+    expect(confirmation).toHaveProperty("checked", false);
+    expect(button).toHaveProperty("disabled", true);
+    await userEvent.setup().click(confirmation);
+
+    await userEvent.setup().click(button);
+    expect(mocks.exportAllRegions).toHaveBeenCalledWith(
+      expect.objectContaining({ globalMultiplier: 3 }),
+      expect.any(Function),
+      expect.any(Object),
+    );
+  });
+
   it("切换到新 Atlas 时清除搜索和倍率编辑状态", async () => {
     const view = render(<ExportPanel resources={resources(atlas)} inferredScale={inferredScale} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索 Region" }), { target: { value: "very-long" } });

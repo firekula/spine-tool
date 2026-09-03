@@ -102,6 +102,49 @@ describe("parseAtlas", () => {
     });
   });
 
+  it("把页面身份规范化后写入 Page 与 Region，并拒绝规范化碰撞", () => {
+    const document = parseAtlas([
+      ".\\./textures\\page.png",
+      "size: 16,16",
+      "",
+      "region",
+      "xy: 0,0",
+      "size: 1,1",
+      "orig: 1,1",
+      "offset: 0,0",
+    ].join("\n"));
+
+    expect(document.pages[0]?.name).toBe("textures/page.png");
+    expect(document.regions[0]?.pageName).toBe("textures/page.png");
+
+    expect(() => parseAtlas([
+      "textures/page.png",
+      "size: 16,16",
+      "",
+      "./textures\\page.png",
+      "size: 16,16",
+    ].join("\n"))).toThrowError(expect.objectContaining({
+      code: "DUPLICATE_PAGE",
+      pageName: "textures/page.png",
+    }));
+  });
+
+  it.each([
+    ["0.5", 0.5],
+    ["1", 1],
+    ["2", 2],
+  ])("把 page scale %s 解析为正有限数值 %s", (sourceScale, expected) => {
+    const document = parseAtlas(`page.png\nsize: 16,16\nscale: ${sourceScale}`);
+
+    expect(document.pages[0]?.scale).toBe(expected);
+    expect(document.pages[0]?.custom).not.toHaveProperty("scale");
+  });
+
+  it.each(["0", "-1", "NaN", "Infinity", ""])("拒绝无效 page scale：%s", (scale) => {
+    expect(() => parseAtlas(`page.png\nsize: 16,16\nscale: ${scale}`))
+      .toThrowError(expect.objectContaining({ code: expect.stringMatching(/INVALID_(?:SIZE|VALUE)/) }));
+  });
+
   it("将以页面专属属性或自定义属性开头的后续属性块识别为新页", () => {
     const document = parseAtlas([
       "page-a.png",

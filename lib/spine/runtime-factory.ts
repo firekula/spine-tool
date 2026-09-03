@@ -1,4 +1,8 @@
 import type { SupportedSpineVersion } from "./version";
+import {
+  normalizeAtlasPageMap,
+  normalizeAtlasPageName,
+} from "../atlas/page-name";
 import type {
   PlaybackSnapshot,
   RegionAttachmentMetadata,
@@ -185,14 +189,9 @@ function loadImage(objectUrl: string, cancellation: LoadCancellation): Promise<H
 }
 
 function textureForPage<T>(textures: ReadonlyMap<string, T>, pageName: string): T {
-  const exact = textures.get(pageName);
-  if (exact) return exact;
-
-  const normalizedPage = pageName.replace(/\\/g, "/").replace(/^\.\//, "");
-  const normalized = [...textures].find(([name]) => (
-    name.replace(/\\/g, "/").replace(/^\.\//, "") === normalizedPage
-  ));
-  if (normalized) return normalized[1];
+  const normalized = normalizeAtlasPageMap(textures);
+  const texture = normalized.get(normalizeAtlasPageName(pageName));
+  if (texture !== undefined) return texture;
 
   throw new Error(`Atlas 纹理页未提供对象 URL: ${pageName}`);
 }
@@ -200,11 +199,7 @@ function textureForPage<T>(textures: ReadonlyMap<string, T>, pageName: string): 
 interface AtlasPageConfig {
   name: string;
   useMipMaps: boolean;
-  premultipliedAlpha: boolean;
-}
-
-function normalizePageName(name: string): string {
-  return name.replace(/\\/g, "/").replace(/^\.\//, "");
+  premultipliedAlpha?: boolean;
 }
 
 /** Reads only page-level rendering fields, leaving the full Atlas parse to the selected Runtime. */
@@ -237,7 +232,10 @@ function atlasPageConfigs(atlasText: string): AtlasPageConfig[] {
     }
 
     if (afterBlank) {
-      current = { name: line, useMipMaps: false, premultipliedAlpha: false };
+      current = { name: normalizeAtlasPageName(line), useMipMaps: false };
+      if (configs.some(({ name }) => name === current?.name)) {
+        throw new Error(`Atlas 纹理页名称规范化后冲突：「${line}」对应重复身份「${current.name}」。`);
+      }
       configs.push(current);
     } else {
       current = null; // First region name ends the page property block.
@@ -249,8 +247,8 @@ function atlasPageConfigs(atlasText: string): AtlasPageConfig[] {
 }
 
 function pageConfig(configs: AtlasPageConfig[], pageName: string): AtlasPageConfig | undefined {
-  const normalizedName = normalizePageName(pageName);
-  return configs.find(({ name }) => normalizePageName(name) === normalizedName);
+  const normalizedName = normalizeAtlasPageName(pageName);
+  return configs.find(({ name }) => normalizeAtlasPageName(name) === normalizedName);
 }
 
 function pageUsesMipMaps(page: RuntimeAtlasPage, config: AtlasPageConfig | undefined): boolean {
@@ -259,7 +257,12 @@ function pageUsesMipMaps(page: RuntimeAtlasPage, config: AtlasPageConfig | undef
   return config?.useMipMaps ?? false;
 }
 
-function atlasPremultipliedAlpha(atlas: RuntimeAtlas, configs: AtlasPageConfig[]): boolean {
+function atlasPremultipliedAlpha(
+  atlas: RuntimeAtlas,
+  configs: AtlasPageConfig[],
+  explicit?: boolean,
+): boolean {
+  if (explicit !== undefined) return explicit;
   const values = atlas.pages.map((page) => (
     typeof page.pma === "boolean"
       ? page.pma
@@ -281,6 +284,7 @@ async function createAtlas(
   context: WebGLRenderingContext,
   adapter: RuntimeAdapter,
   cancellation: LoadCancellation,
+  explicitPremultipliedAlpha?: boolean,
 ): Promise<CreatedAtlas> {
   const configs = atlasPageConfigs(input.atlasText);
   const images = new Map<string, HTMLImageElement>();
@@ -303,7 +307,7 @@ async function createAtlas(
         createdTextures.push(texture);
         return texture;
       });
-      const premultipliedAlpha = atlasPremultipliedAlpha(atlas, configs);
+      const premultipliedAlpha = atlasPremultipliedAlpha(atlas, configs, explicitPremultipliedAlpha);
       return { atlas, premultipliedAlpha };
     } catch (error) {
       if (atlas) atlas.dispose();
@@ -325,7 +329,10 @@ async function createAtlas(
       if (page.setTexture) page.setTexture(texture);
       else page.texture = texture;
     }
-    return { atlas, premultipliedAlpha: atlasPremultipliedAlpha(atlas, configs) };
+    return {
+      atlas,
+      premultipliedAlpha: atlasPremultipliedAlpha(atlas, configs, explicitPremultipliedAlpha),
+    };
   } catch (error) {
     // 4.0 TextureAtlas.dispose assumes every page already has a texture, so
     // dispose the successfully constructed subset ourselves on partial loads.
@@ -386,6 +393,9 @@ class RuntimeBridge implements SpineRuntimeBridge {
   async load(input: RuntimeLoadInput): Promise<SkeletonMetadata> {
     if (this.disposed) throw new Error("Runtime bridge 已释放");
     if (this.atlas || this.renderer || this.state) throw new Error("Runtime bridge 已加载资源");
+    if (this.version === "3.8" && input.alphaMode === undefined) {
+      throw new Error("Spine 3.8 纹理的 Alpha 模式需要明确选择（预乘 PMA 或直通 Straight）。");
+    }
 
     const generation = ++this.loadGeneration;
     for (const pending of this.pendingLoads.values()) pending.cancel();
@@ -415,7 +425,13 @@ class RuntimeBridge implements SpineRuntimeBridge {
       });
       if (!context) throw new Error("浏览器不支持 WebGL");
 
-      createdAtlas = await createAtlas(input, context, this.adapter, cancellation);
+      createdAtlas = await createAtlas(
+        input,
+        context,
+        this.adapter,
+        cancellation,
+        this.version === "3.8" ? input.alphaMode === "premultiplied" : undefined,
+      );
       releaseObjectUrls();
       if (this.disposed || generation !== this.loadGeneration || cancellation.isCancelled()) {
         throw loadCancelledError();

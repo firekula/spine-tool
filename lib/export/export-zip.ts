@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { normalizeAtlasPageMap, normalizeAtlasPageName } from "@/lib/atlas/page-name";
 import { restoreRegion } from "@/lib/atlas/restore-region";
 import type { AtlasDocument, AtlasRegion } from "@/lib/atlas/types";
 import type { ScaleEvidence, ScaleInference } from "@/lib/spine/scale-inference";
@@ -99,6 +100,7 @@ function evidenceForRegion(inferredScale: ScaleInference, name: string): ScaleEv
 }
 
 function baseReport(region: AtlasRegion, input: ExportAllInput, override: number | null): ExportRegionReport {
+  const pageName = normalizeAtlasPageName(region.pageName);
   const unrotatedWidth = region.rotation === 90 || region.rotation === 270
     ? region.packedHeight
     : region.packedWidth;
@@ -108,7 +110,7 @@ function baseReport(region: AtlasRegion, input: ExportAllInput, override: number
   return {
     regionKey: regionKey(region),
     regionName: region.name,
-    sourceTexturePage: region.pageName,
+    sourceTexturePage: pageName,
     atlas: {
       crop: { x: region.x, y: region.y, width: region.packedWidth, height: region.packedHeight },
       rotation: region.rotation,
@@ -147,12 +149,17 @@ export async function exportAllRegions(
 
   const zip = new JSZip();
   const allocator = createZipPathAllocator();
+  const textures = normalizeAtlasPageMap(input.textures);
   const reports: ExportRegionReport[] = [];
   const total = input.atlas.regions.length;
 
   for (let position = 0; position < total; position += 1) {
     throwIfAborted(options.signal);
-    const region = input.atlas.regions[position]!;
+    const rawRegion = input.atlas.regions[position]!;
+    const region = {
+      ...rawRegion,
+      pageName: normalizeAtlasPageName(rawRegion.pageName),
+    };
     const override = input.regionOverrides.get(regionKey(region))
       ?? input.regionOverrides.get(region.name)
       ?? null;
@@ -160,7 +167,7 @@ export async function exportAllRegions(
     const reservedZipPath = allocator.allocate(region.name);
 
     try {
-      const texture = input.textures.get(region.pageName);
+      const texture = textures.get(region.pageName);
       if (!texture) {
         report.status = "skipped";
         report.error = `缺少纹理页「${region.pageName}」。`;

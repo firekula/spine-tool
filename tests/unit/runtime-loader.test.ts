@@ -417,7 +417,10 @@ describe("createRuntimeBridge", () => {
     });
     const bridge = createRuntimeBridge(version, harness.runtime);
 
-    const metadata = await bridge.load(harness.input);
+    const metadata = await bridge.load({
+      ...harness.input,
+      alphaMode: version === "3.8" ? "straight" : undefined,
+    });
 
     const atlasName = attachmentPath || attachmentRegionName;
     expect(metadata.regionAttachments).toEqual([{
@@ -600,6 +603,7 @@ describe("createRuntimeBridge", () => {
     const bridge = createRuntimeBridge(version, harness.runtime);
     await bridge.load({
       ...harness.input,
+      alphaMode: version === "3.8" ? "straight" : undefined,
       atlasText: "page.png\nsize: 2,2\nfilter: MipMapLinearLinear,Linear\nrepeat: none\n",
       textureObjectUrls: new Map([["page.png", "blob:mipmap"]]),
     });
@@ -609,6 +613,58 @@ describe("createRuntimeBridge", () => {
     expect(harness.drawPremultipliedAlpha).toEqual([false]);
   });
 
+  it.each([
+    { alphaMode: "premultiplied", expected: true },
+    { alphaMode: "straight", expected: false },
+  ] as const)("3.8 明确选择 $alphaMode 后传入对应 renderer 混合模式", async ({ alphaMode, expected }) => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ atlasMode: "constructor-loader", pages: [{ name: "page.png" }] });
+    const bridge = createRuntimeBridge("3.8", harness.runtime);
+
+    await bridge.load({
+      ...harness.input,
+      alphaMode,
+      atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["page.png", `blob:${alphaMode}`]]),
+    });
+    bridge.frame(0);
+
+    expect(harness.drawPremultipliedAlpha).toEqual([expected]);
+  });
+
+  it("3.8 缺少明确 Alpha 选择时拒绝加载，而不是硬编码 straight", async () => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ atlasMode: "constructor-loader", pages: [{ name: "page.png" }] });
+    const bridge = createRuntimeBridge("3.8", harness.runtime);
+
+    await expect(bridge.load({
+      ...harness.input,
+      atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["page.png", "blob:missing-alpha-mode"]]),
+    })).rejects.toThrow(/3\.8.*Alpha.*明确选择/);
+  });
+
+  it("3.8 Runtime 用规范化页面身份查找纹理与页面配置", async () => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({
+      atlasMode: "constructor-loader",
+      pages: [{ name: ".\\./textures\\page.png" }],
+    });
+    const bridge = createRuntimeBridge("3.8", harness.runtime);
+
+    await bridge.load({
+      ...harness.input,
+      alphaMode: "straight",
+      atlasText: ".\\./textures\\page.png\nsize: 2,2\nfilter: MipMapLinearLinear,Linear\nrepeat: none\n",
+      textureObjectUrls: new Map([["textures/page.png", "blob:normalized-page"]]),
+    });
+
+    expect(harness.textureMipMaps).toEqual([true]);
+  });
+
   it("把 Atlas page 的 PMA=true 传给 renderer", async () => {
     installImmediateImages();
     vi.spyOn(URL, "revokeObjectURL");
@@ -616,6 +672,7 @@ describe("createRuntimeBridge", () => {
     const bridge = createRuntimeBridge("4.0", harness.runtime);
     await bridge.load({
       ...harness.input,
+      alphaMode: "straight",
       atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\npma: true\n",
       textureObjectUrls: new Map([["page.png", "blob:pma"]]),
     });
