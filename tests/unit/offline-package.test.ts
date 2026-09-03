@@ -82,6 +82,13 @@ describe("离线包脚本", () => {
       { html: '<img src="https:&NewLine;//example.invalid/entity-newline.png">' },
       { html: "<img src=https:&#10;//example.invalid/numeric-newline.png>" },
       { html: '<img src="https://example.invalid/first.png" src="./ignored-safe.png">' },
+      { html: '<button formaction="https://example.invalid/submit">提交</button>' },
+      { html: '<video poster="https://example.invalid/poster.png"></video>' },
+      { html: '<object data="https://example.invalid/document.pdf"></object>' },
+      { html: '<div style="background:url(https://example.invalid/background.png)"></div>' },
+      { html: '<style>@import "https://example.invalid/theme.css";</style>' },
+      { html: '<script type="text/javascript1.5">fetch(getEndpoint())</script>' },
+      { html: '<script type="text/x-unknown-script">fetch(getEndpoint())</script>' },
       { html: '<script>fetch("https://example.invalid/inline-script");</script>' },
       { js: "fetch(`https:\\u002f\\u002fexample.invalid/template-fetch`);" },
       { js: "import(`https:\\x2f\\u{2f}example.invalid/template-import.js`);" },
@@ -92,6 +99,13 @@ describe("离线包脚本", () => {
       { js: "const u = `./${specifier}`; import(u);" },
       { js: "const u = makeUrl(); new WebSocket(u);" },
       { js: "const u = `/events/${channel}`; new EventSource(u);" },
+      { js: 'new Worker(new URL("./worker.js", "https://example.invalid/base/"));' },
+      { js: 'new SharedWorker(new URL("./worker.js", getBase()));' },
+      { js: 'window.navigator.sendBeacon(getEndpoint(), "payload");' },
+      { js: "(0, fetch)(getEndpoint());" },
+      { js: "fetch.call(globalThis, getEndpoint());" },
+      { js: "const request = globalThis.fetch; request(getEndpoint());" },
+      { js: 'const endpoint = "https://example.invalid/not-called";' },
       { html: '<script type="module">const u = `./${name}`; fetch(u)</script>' },
     ];
 
@@ -109,8 +123,8 @@ describe("离线包脚本", () => {
 
   it("允许 blob、data、相对资源和中文文本", () => {
     const directory = makeOfflineBuild({
-      html: '<!-- <img src=https://example.invalid/comment-only> --><pre>&#60;img src=https://example.invalid/text-only&#62;</pre><p>离线中文说明</p><script type=application/json>{"help":"<img src=https://example.invalid/text-only>"}</script><img src=blob:local-image><img src=data:image/png;base64,AAAA><img src="./first-safe.png" src="https://example.invalid/ignored-duplicate.png"><img srcset="data:text/plain,https://example.invalid/not-a-request 1x, ./local.png 2x"><script src=../assets/index-a.js></script>',
-      js: 'fetch("blob:local-data"); fetch("data:text/plain,本地"); import("./runtime-3_8-Ab12cd34.js"); const xhr = new XMLHttpRequest(); xhr.open(`GET`, `../assets/local.json`);',
+      html: '<!-- <img src=https://example.invalid/comment-only> --><pre>&#60;img src=https://example.invalid/text-only&#62;</pre><p>离线中文说明</p><script type=application/json>{"help":"<img src=https://example.invalid/text-only>"}</script><script type=text/plain>fetch(getEndpoint())</script><button formaction=./submit>提交</button><video poster=./poster.png></video><video poster=data:image/png;base64,AAAA></video><object data=blob:local-document></object><div style="background:url(./background.png)"></div><style>.local{background:url(data:image/png;base64,AAAA)}</style><img src=blob:local-image><img src=data:image/png;base64,AAAA><img src="./first-safe.png" src="https://example.invalid/ignored-duplicate.png"><img srcset="data:text/plain,https://example.invalid/not-a-request 1x, ./local.png 2x"><script src=../assets/index-a.js></script>',
+      js: 'fetch("blob:local-data"); fetch("data:text/plain,本地"); import("./runtime-3_8-Ab12cd34.js"); const xhr = new XMLHttpRequest(); xhr.open(`GET`, `../assets/local.json`); const workerPath = "./worker.js"; new Worker(workerPath); const blobWorker = "blob:local-worker"; new Worker(blobWorker); const moduleBase = import.meta.url; new SharedWorker(new URL("./shared-worker.js", moduleBase));',
       css: 'body { background-image: url(data:image/png;base64,AAAA); }',
     });
     const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-allowed-"));

@@ -112,8 +112,15 @@ function srcsetUrls(value) {
 }
 
 function executableScript(attributes) {
-  const type = attributes.find(({ name }) => name === "type")?.value.trim().toLowerCase();
-  return !type || type === "module" || /^(?:application|text)\/(?:java|ecma)script$/.test(type);
+  const rawType = attributes.find(({ name }) => name === "type")?.value.trim().toLowerCase();
+  if (!rawType) return true;
+  const type = rawType.split(";", 1)[0].trim();
+  const explicitDataType = type === "application/json"
+    || type === "text/json"
+    || type === "text/plain"
+    || type === "application/octet-stream"
+    || /\+json$/.test(type);
+  return !explicitDataType;
 }
 
 function nodeText(node) {
@@ -132,12 +139,21 @@ function externalHtmlTargets(path, contents) {
     if (node.tagName) {
       const attributes = node.attrs ?? [];
       for (const { name, value } of attributes) {
-        if (!["src", "href", "srcset", "action"].includes(name)) continue;
-        const candidates = name === "srcset" ? srcsetUrls(canonicalUrl(value)) : [value];
-        if (candidates.some(isExternalUrl)) occurrences.push(`${path}: ${name}=${value}`);
+        const urlAttribute = ["src", "href", "srcset", "action", "formaction", "poster"].includes(name)
+          || (node.tagName === "object" && name === "data");
+        if (urlAttribute) {
+          const candidates = name === "srcset" ? srcsetUrls(canonicalUrl(value)) : [value];
+          if (candidates.some(isExternalUrl)) occurrences.push(`${path}: ${name}=${value}`);
+        }
+        if (name === "style") {
+          occurrences.push(...externalCssTargets(`${path} ${node.tagName}[style]`, value));
+        }
       }
       if (node.tagName === "script" && executableScript(attributes)) {
         occurrences.push(...externalJavaScriptTargets(`${path} inline script`, nodeText(node)));
+      }
+      if (node.tagName === "style") {
+        occurrences.push(...externalCssTargets(`${path} inline style`, nodeText(node)));
       }
     }
     for (const child of node.childNodes ?? []) visit(child);
@@ -165,9 +181,81 @@ function unwrapExpression(node) {
 function staticString(expression) {
   const node = unwrapExpression(expression);
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) {
+    let value = node.head.text;
+    for (const span of node.templateSpans) {
+      const expressionValue = staticString(span.expression);
+      if (expressionValue === undefined) return undefined;
+      value += expressionValue + span.literal.text;
+    }
+    return value;
+  }
   if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
     const left = staticString(node.left);
     const right = staticString(node.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
+  return undefined;
+}
+
+function bindingPropertyName(node) {
+  if (!node) return undefined;
+  if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) return node.text;
+  return ts.isComputedPropertyName(node) ? staticString(node.expression) : undefined;
+}
+
+function collectJavaScriptBindings(sourceFile) {
+  const bindings = new Map();
+  const add = (name, descriptor) => {
+    const descriptors = bindings.get(name) ?? [];
+    descriptors.push(descriptor);
+    bindings.set(name, descriptors);
+  };
+
+  const bind = (name, initializer) => {
+    if (ts.isIdentifier(name)) {
+      add(name.text, { kind: "expression", expression: initializer });
+      return;
+    }
+    if (!ts.isObjectBindingPattern(name)) return;
+    for (const element of name.elements) {
+      if (element.dotDotDotToken || !ts.isIdentifier(element.name)) continue;
+      const member = bindingPropertyName(element.propertyName) ?? element.name.text;
+      add(element.name.text, { kind: "property", receiver: initializer, name: member });
+    }
+  };
+
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && node.initializer) bind(node.name, node.initializer);
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isIdentifier(unwrapExpression(node.left))
+    ) {
+      add(unwrapExpression(node.left).text, { kind: "expression", expression: node.right });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return bindings;
+}
+
+function resolvedStaticString(expression, values) {
+  const node = unwrapExpression(expression);
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isIdentifier(node)) return values.get(node.text);
+  if (ts.isTemplateExpression(node)) {
+    let value = node.head.text;
+    for (const span of node.templateSpans) {
+      const expressionValue = resolvedStaticString(span.expression, values);
+      if (expressionValue === undefined) return undefined;
+      value += expressionValue + span.literal.text;
+    }
+    return value;
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = resolvedStaticString(node.left, values);
+    const right = resolvedStaticString(node.right, values);
     return left === undefined || right === undefined ? undefined : left + right;
   }
   return undefined;
@@ -184,37 +272,6 @@ function propertyReceiver(expression) {
   const node = unwrapExpression(expression);
   if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) return node.expression;
   return undefined;
-}
-
-function isGlobalReference(expression, name) {
-  const node = unwrapExpression(expression);
-  if (ts.isIdentifier(node)) return node.text === name;
-  if (propertyName(node) !== name) return false;
-  const receiver = unwrapExpression(propertyReceiver(node));
-  return ts.isIdentifier(receiver) && ["globalThis", "self", "window"].includes(receiver.text);
-}
-
-function isNavigatorReference(expression, name) {
-  const node = unwrapExpression(expression);
-  if (propertyName(node) !== name) return false;
-  const receiver = unwrapExpression(propertyReceiver(node));
-  return ts.isIdentifier(receiver) && receiver.text === "navigator";
-}
-
-function referenceKey(expression) {
-  const node = unwrapExpression(expression);
-  if (ts.isIdentifier(node)) return `identifier:${node.text}`;
-  if (node.kind === ts.SyntaxKind.ThisKeyword) return "this";
-  const receiver = propertyReceiver(node);
-  const name = propertyName(node);
-  if (!receiver || name === undefined) return undefined;
-  const parent = referenceKey(receiver);
-  return parent ? `${parent}.${name}` : undefined;
-}
-
-function isXmlHttpRequestConstruction(expression) {
-  const node = unwrapExpression(expression);
-  return ts.isNewExpression(node) && isGlobalReference(node.expression, "XMLHttpRequest");
 }
 
 function trustedJavaScript(path, contents) {
@@ -240,8 +297,11 @@ function externalJavaScriptTargets(path, contents) {
   const sourceFile = ts.createSourceFile(path, contents, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const occurrences = [];
   const seen = new Set();
-  const xhrReferences = new Set();
   const trust = trustedJavaScript(path, contents);
+  // Exact hash-pinned helpers have already been reviewed byte-for-byte. Avoid
+  // building a whole-bundle alias graph for them; their narrowly allowed
+  // dynamic calls are still checked below by syntax and trust kind.
+  const bindings = trust ? new Map() : collectJavaScriptBindings(sourceFile);
 
   const record = (node, reason) => {
     const key = `${node.pos}:${node.end}:${reason}`;
@@ -259,29 +319,227 @@ function externalJavaScriptTargets(path, contents) {
     occurrences.push(`${path}:${location.line + 1}:${location.character + 1}: JavaScript 无法解析: ${message}`);
   }
 
-  const collectXhrReferences = (node) => {
-    if (ts.isVariableDeclaration(node) && node.initializer && isXmlHttpRequestConstruction(node.initializer)) {
-      const key = referenceKey(node.name);
-      if (key) xhrReferences.add(key);
-    }
-    if (
-      ts.isBinaryExpression(node)
-      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      && isXmlHttpRequestConstruction(node.right)
-    ) {
-      const key = referenceKey(node.left);
-      if (key) xhrReferences.add(key);
-    }
-    ts.forEachChild(node, collectXhrReferences);
-  };
-  collectXhrReferences(sourceFile);
+  const callableKinds = new Set(["fetch", "importScripts", "sendBeacon", "xhrOpen"]);
+  const globalMembers = new Map([
+    ["fetch", "fetch"],
+    ["importScripts", "importScripts"],
+    ["sendBeacon", "sendBeacon"],
+    ["Worker", "Worker"],
+    ["SharedWorker", "SharedWorker"],
+    ["WebSocket", "WebSocket"],
+    ["EventSource", "EventSource"],
+    ["XMLHttpRequest", "XMLHttpRequest"],
+    ["URL", "URL"],
+  ]);
 
-  const auditNetworkArgument = (call, argument, category) => {
+  const kindsForProperty = (receiverKinds, name) => {
+    const kinds = new Set();
+    for (const receiverKind of receiverKinds) {
+      if (receiverKind === "global") {
+        if (["globalThis", "self", "window"].includes(name)) kinds.add("global");
+        if (name === "navigator") kinds.add("navigator");
+        const globalMember = globalMembers.get(name);
+        if (globalMember) kinds.add(globalMember);
+      }
+      if (receiverKind === "navigator" && name === "sendBeacon") kinds.add("sendBeacon");
+      if (receiverKind === "xhr" && name === "open") kinds.add("xhrOpen");
+      if (callableKinds.has(receiverKind) && (name === "call" || name === "apply")) {
+        kinds.add(`${receiverKind}:${name}`);
+      }
+    }
+    return kinds;
+  };
+
+  const addKinds = (target, source) => {
+    for (const kind of source) target.add(kind);
+    return target;
+  };
+
+  const bindingKinds = new Map();
+  const directIdentifierKinds = (name) => {
+    const kinds = new Set();
+    if (["globalThis", "self", "window"].includes(name)) kinds.add("global");
+    if (name === "navigator") kinds.add("navigator");
+    const globalMember = globalMembers.get(name);
+    if (globalMember) kinds.add(globalMember);
+    if (/^(?:xhr|xmlHttpRequest)$/i.test(name)) kinds.add("xhr");
+    return kinds;
+  };
+
+  const resolveValueKinds = (expression) => {
+    const node = unwrapExpression(expression);
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      return resolveValueKinds(node.right);
+    }
+    if (ts.isConditionalExpression(node)) {
+      return addKinds(
+        resolveValueKinds(node.whenTrue),
+        resolveValueKinds(node.whenFalse),
+      );
+    }
+
+    const kinds = new Set();
+    if (ts.isIdentifier(node)) {
+      return addKinds(directIdentifierKinds(node.text), bindingKinds.get(node.text) ?? []);
+    }
+
+    const receiver = propertyReceiver(node);
+    const name = propertyName(node);
+    if (receiver && name !== undefined) return kindsForProperty(resolveValueKinds(receiver), name);
+
+    if (ts.isNewExpression(node)) {
+      if (resolveValueKinds(node.expression).has("XMLHttpRequest")) kinds.add("xhr");
+      return kinds;
+    }
+
+    if (ts.isCallExpression(node)) {
+      const callReceiver = propertyReceiver(node.expression);
+      if (callReceiver && propertyName(node.expression) === "bind") {
+        for (const kind of resolveValueKinds(callReceiver)) {
+          if (callableKinds.has(kind)) kinds.add(kind);
+        }
+      }
+    }
+    return kinds;
+  };
+
+  const kindDependencies = (expression, dependencies = new Set()) => {
+    const node = unwrapExpression(expression);
+    if (ts.isIdentifier(node)) {
+      dependencies.add(node.text);
+      return dependencies;
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      return kindDependencies(node.right, dependencies);
+    }
+    if (ts.isConditionalExpression(node)) {
+      kindDependencies(node.whenTrue, dependencies);
+      return kindDependencies(node.whenFalse, dependencies);
+    }
+    const receiver = propertyReceiver(node);
+    if (receiver && propertyName(node) !== undefined) return kindDependencies(receiver, dependencies);
+    if (ts.isNewExpression(node)) return kindDependencies(node.expression, dependencies);
+    if (ts.isCallExpression(node)) {
+      const callReceiver = propertyReceiver(node.expression);
+      if (callReceiver && propertyName(node.expression) === "bind") {
+        return kindDependencies(callReceiver, dependencies);
+      }
+    }
+    return dependencies;
+  };
+
+  const kindDependents = new Map();
+  for (const [target, descriptors] of bindings) {
+    for (const descriptor of descriptors) {
+      const expression = descriptor.kind === "expression" ? descriptor.expression : descriptor.receiver;
+      for (const dependency of kindDependencies(expression)) {
+        const dependents = kindDependents.get(dependency) ?? new Set();
+        dependents.add(target);
+        kindDependents.set(dependency, dependents);
+      }
+    }
+  }
+
+  const kindQueue = [...bindings.keys()];
+  const queuedKinds = new Set(kindQueue);
+  for (let position = 0; position < kindQueue.length; position += 1) {
+    const name = kindQueue[position];
+    queuedKinds.delete(name);
+    const kinds = bindingKinds.get(name) ?? new Set();
+    const previousSize = kinds.size;
+    for (const descriptor of bindings.get(name) ?? []) {
+      const descriptorKinds = descriptor.kind === "expression"
+        ? resolveValueKinds(descriptor.expression)
+        : kindsForProperty(resolveValueKinds(descriptor.receiver), descriptor.name);
+      addKinds(kinds, descriptorKinds);
+    }
+    bindingKinds.set(name, kinds);
+    if (kinds.size === previousSize) continue;
+    for (const dependent of kindDependents.get(name) ?? []) {
+      if (queuedKinds.has(dependent)) continue;
+      queuedKinds.add(dependent);
+      kindQueue.push(dependent);
+    }
+  }
+
+  const staticValues = new Map();
+  if (!trust) {
+    const staticDependencies = (expression, dependencies = new Set()) => {
+      const node = unwrapExpression(expression);
+      if (ts.isIdentifier(node)) dependencies.add(node.text);
+      else if (ts.isTemplateExpression(node)) {
+        for (const span of node.templateSpans) staticDependencies(span.expression, dependencies);
+      } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+        staticDependencies(node.left, dependencies);
+        staticDependencies(node.right, dependencies);
+      }
+      return dependencies;
+    };
+
+    const staticDependents = new Map();
+    for (const [target, descriptors] of bindings) {
+      for (const descriptor of descriptors) {
+        if (descriptor.kind !== "expression") continue;
+        for (const dependency of staticDependencies(descriptor.expression)) {
+          const dependents = staticDependents.get(dependency) ?? new Set();
+          dependents.add(target);
+          staticDependents.set(dependency, dependents);
+        }
+      }
+    }
+
+    const staticQueue = [...bindings.keys()];
+    const queuedStatic = new Set(staticQueue);
+    for (let position = 0; position < staticQueue.length; position += 1) {
+      const name = staticQueue[position];
+      queuedStatic.delete(name);
+      if (staticValues.has(name)) continue;
+      const descriptors = bindings.get(name) ?? [];
+      const values = descriptors.map((descriptor) => descriptor.kind === "expression"
+        ? resolvedStaticString(descriptor.expression, staticValues)
+        : undefined);
+      if (values.length === 0 || values.some((value) => value === undefined) || new Set(values).size !== 1) continue;
+      staticValues.set(name, values[0]);
+      for (const dependent of staticDependents.get(name) ?? []) {
+        if (queuedStatic.has(dependent)) continue;
+        queuedStatic.add(dependent);
+        staticQueue.push(dependent);
+      }
+    }
+  }
+
+  const isImportMetaUrl = (expression, resolving = new Set()) => {
+    const node = unwrapExpression(expression);
+    if (ts.isIdentifier(node)) {
+      if (resolving.has(node.text)) return false;
+      const descriptors = bindings.get(node.text) ?? [];
+      if (descriptors.length === 0) return false;
+      const next = new Set(resolving).add(node.text);
+      return descriptors.every((descriptor) => descriptor.kind === "expression"
+        && isImportMetaUrl(descriptor.expression, next));
+    }
+    if (propertyName(node) !== "url") return false;
+    const receiver = unwrapExpression(propertyReceiver(node));
+    return ts.isMetaProperty(receiver)
+      && receiver.keywordToken === ts.SyntaxKind.ImportKeyword
+      && receiver.name.text === "meta";
+  };
+
+  const auditNetworkArgument = (
+    call,
+    argument,
+    category,
+    allowImportMetaUrl = false,
+    allowResolvedStatic = false,
+  ) => {
     if (!argument) {
       record(call, `${category} 缺少 URL 参数`);
       return;
     }
-    const value = staticString(argument);
+    if (allowImportMetaUrl && isImportMetaUrl(argument)) return;
+    const value = allowResolvedStatic
+      ? resolvedStaticString(argument, staticValues)
+      : staticString(argument);
     if (value === undefined) {
       if (!allowsTrustedDynamicTarget(trust, category, call)) record(argument, `${category} 使用动态网络目标`);
       return;
@@ -289,20 +547,50 @@ function externalJavaScriptTargets(path, contents) {
     if (!isSafeOfflineUrl(value)) record(argument, `${category} 使用外部 URL`);
   };
 
-  const isXhrOpenCall = (call) => {
-    if (propertyName(call.expression) !== "open") return false;
-    const receiver = propertyReceiver(call.expression);
-    if (!receiver) return false;
-    if (isXmlHttpRequestConstruction(receiver)) return true;
-    const key = referenceKey(receiver);
-    if (key !== undefined && xhrReferences.has(key)) return true;
-    const name = ts.isIdentifier(unwrapExpression(receiver))
-      ? unwrapExpression(receiver).text
-      : propertyName(receiver);
-    return /^(?:xhr|xmlHttpRequest)$/i.test(name ?? "");
+  const appliedArguments = (argument) => {
+    const node = argument && unwrapExpression(argument);
+    return node && ts.isArrayLiteralExpression(node) ? [...node.elements] : undefined;
+  };
+
+  const auditCallableInvocation = (call) => {
+    for (const resolvedKind of resolveValueKinds(call.expression)) {
+      const [kind, adapter = "direct"] = resolvedKind.split(":");
+      if (!callableKinds.has(kind)) continue;
+
+      let argumentsList = [...call.arguments];
+      if (adapter === "call") argumentsList = argumentsList.slice(1);
+      if (adapter === "apply") {
+        const applied = appliedArguments(argumentsList[1]);
+        if (!applied) {
+          record(argumentsList[1] ?? call, `${kind} 使用动态参数列表`);
+          continue;
+        }
+        argumentsList = applied;
+      }
+
+      if (kind === "importScripts") {
+        if (argumentsList.length === 0) auditNetworkArgument(call, undefined, kind);
+        for (const argument of argumentsList) auditNetworkArgument(call, argument, kind);
+      } else {
+        const index = kind === "xhrOpen" ? 1 : 0;
+        const category = kind === "xhrOpen" ? "XMLHttpRequest.open" : kind;
+        auditNetworkArgument(call, argumentsList[index], category);
+      }
+    }
   };
 
   const visit = (node) => {
+    if (
+      !trust
+      && (ts.isStringLiteral(node)
+        || ts.isNoSubstitutionTemplateLiteral(node)
+        || ts.isTemplateExpression(node)
+        || (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken))
+    ) {
+      const value = resolvedStaticString(node, staticValues);
+      if (value !== undefined && isExternalUrl(value)) record(node, "普通应用代码包含静态外部 URL");
+    }
+
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       if (node.moduleSpecifier) {
         const value = staticString(node.moduleSpecifier);
@@ -311,32 +599,35 @@ function externalJavaScriptTargets(path, contents) {
     } else if (ts.isCallExpression(node)) {
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         auditNetworkArgument(node, node.arguments[0], "import()");
-      } else if (isGlobalReference(node.expression, "fetch")) {
-        auditNetworkArgument(node, node.arguments[0], "fetch");
-      } else if (isGlobalReference(node.expression, "importScripts")) {
-        for (const argument of node.arguments) auditNetworkArgument(node, argument, "importScripts");
-      } else if (isGlobalReference(node.expression, "sendBeacon") || isNavigatorReference(node.expression, "sendBeacon")) {
-        auditNetworkArgument(node, node.arguments[0], "sendBeacon");
-      } else if (isXhrOpenCall(node)) {
-        auditNetworkArgument(node, node.arguments[1], "XMLHttpRequest.open");
-      }
+      } else auditCallableInvocation(node);
     } else if (ts.isNewExpression(node)) {
       for (const constructor of ["Worker", "SharedWorker", "WebSocket", "EventSource"]) {
-        if (!isGlobalReference(node.expression, constructor)) continue;
+        if (!resolveValueKinds(node.expression).has(constructor)) continue;
         const argument = node.arguments?.[0];
         if ((constructor === "Worker" || constructor === "SharedWorker") && argument) {
           const unwrapped = unwrapExpression(argument);
-          if (ts.isNewExpression(unwrapped) && isGlobalReference(unwrapped.expression, "URL")) {
-            auditNetworkArgument(node, unwrapped.arguments?.[0], constructor);
+          if (ts.isNewExpression(unwrapped) && resolveValueKinds(unwrapped.expression).has("URL")) {
+            auditNetworkArgument(node, unwrapped.arguments?.[0], `${constructor} path`, false, true);
+            if ((unwrapped.arguments?.length ?? 0) > 1) {
+              auditNetworkArgument(node, unwrapped.arguments?.[1], `${constructor} base`, true, true);
+            }
             break;
           }
         }
-        auditNetworkArgument(node, argument, constructor);
+        auditNetworkArgument(
+          node,
+          argument,
+          constructor,
+          false,
+          constructor === "Worker" || constructor === "SharedWorker",
+        );
         break;
       }
-      if (isGlobalReference(node.expression, "URL")) {
-        const value = node.arguments?.[0] ? staticString(node.arguments[0]) : undefined;
-        if (value !== undefined && isExternalUrl(value)) record(node.arguments[0], "URL 使用外部目标");
+      if (resolveValueKinds(node.expression).has("URL")) {
+        for (const argument of node.arguments?.slice(0, 2) ?? []) {
+          const value = staticString(argument);
+          if (value !== undefined && isExternalUrl(value)) record(argument, "URL 使用外部目标");
+        }
       }
     } else if (
       ts.isBinaryExpression(node)

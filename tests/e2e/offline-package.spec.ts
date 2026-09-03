@@ -34,7 +34,15 @@ test.beforeAll(async () => {
   for (const version of ["3_8", "4_0", "4_1", "4_2"]) {
     expect(filenames.some((name) => new RegExp(`^assets/runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(name))).toBe(true);
   }
-  expect(await offlineZip.file("index.html")!.async("string")).toContain("connect-src 'none'");
+  const offlineHtml = await offlineZip.file("index.html")!.async("string");
+  for (const directive of [
+    "connect-src 'none'",
+    "form-action 'none'",
+    "object-src 'none'",
+    "worker-src 'self' blob:",
+  ]) {
+    expect(offlineHtml).toContain(directive);
+  }
 
   const runtimeText = await Promise.all(filenames
     .filter((name) => /\.(?:html|js|css)$/.test(name))

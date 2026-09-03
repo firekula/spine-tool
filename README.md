@@ -54,7 +54,7 @@ npm run package:offline
 
 `npm run package:offline` 会重新生成离线静态构建，校验四个 Runtime chunk、许可文件和远程运行依赖，然后创建根目录的 `spine-preview-export-offline.zip`。
 
-远程依赖审计先按浏览器 HTML 解析规则读取元素与属性，再用 JavaScript AST 检查可执行脚本。普通应用代码里的 `fetch`、动态 `import()`、XHR、WebSocket、EventSource 等网络目标必须能静态确定为相对路径、`blob:` 或 `data:`；无法证明安全的表达式会让打包失败。官方 Spine Runtime 自带的通用资源加载器以及 Vite 的 modulepreload helper 需要接收运行时本地 URL，因此只有路径、调用形状和完整 SHA-256 都与已复核构建一致时才允许这些动态参数；任一字节变化都会撤销例外并阻止打包。离线入口的 `connect-src 'none'` CSP 和 E2E 的外部请求拦截继续提供运行时防线。
+远程依赖审计先按浏览器 HTML 解析规则读取 URL 属性、内联样式和可执行脚本，再用 JavaScript AST 追踪 Worker URL 的 path/base、全局网络 API 的间接调用与别名。普通应用 chunk 中任何可静态求值的外部 URL 都会被拒绝；网络目标必须能直接证明为相对路径、`blob:` 或 `data:`。官方 Spine Runtime 自带的通用资源加载器以及 Vite 的 modulepreload helper 需要接收运行时本地 URL，因此只有路径、调用形状和完整 SHA-256 都与已复核构建一致时才允许这些动态参数；任一字节变化都会撤销例外并阻止打包。离线入口以 `connect-src 'none'`、`form-action 'none'`、`object-src 'none'` 和仅限本地/`blob:` 的 `worker-src` CSP 配合 E2E 外部请求拦截提供运行时防线。
 
 ## Spine Runtime 许可
 
