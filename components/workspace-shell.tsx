@@ -421,7 +421,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         <StatusCenter issues={state.warnings} />
         <div className="preview-surface">
           {activeBridge ? (
-            <PreviewCanvas bridge={activeBridge} metadata={activeMetadata} loadInput={suppliedBridge ? undefined : session?.input} onLoaded={handleLoaded} onLoadError={handlePreviewError} onSnapshot={handleSnapshot} />
+            <PreviewCanvas bridge={activeBridge} metadata={activeMetadata} loadInput={suppliedBridge ? undefined : session?.input} onLoaded={handleLoaded} onLoadError={handlePreviewError} onFrameError={handlePreviewError} onSnapshot={handleSnapshot} />
           ) : (
             <div className="preview-empty">
               <FileUp size={42} aria-hidden="true" />

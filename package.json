@@ -8,7 +8,8 @@
     "test": "vitest run",
     "build": "tsc --noEmit && vite build",
     "build:offline": "tsc --noEmit && vite build --config vite.offline.config.ts",
-    "verify-runtime-assets": "node scripts/verify-runtime-assets.mjs"
+    "verify-runtime-assets": "node scripts/verify-runtime-assets.mjs",
+    "package:offline": "node scripts/package-offline.mjs"
   },
   "dependencies": {
     "@esotericsoftware/spine-webgl-4.0": "npm:@esotericsoftware/spine-webgl@4.0.31",

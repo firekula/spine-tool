@@ -151,6 +151,24 @@ describe("workspace controls", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "速度" }), "1.25");
     expect(bridge.setSpeed).toHaveBeenLastCalledWith(1.25);
   });
+
+  it("帧渲染失败时降级为 Atlas 仍可导出的警告", () => {
+    const bridge = fakeBridge();
+    const callbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.mocked(bridge.frame).mockImplementation(() => { throw new Error("WebGL context 已丢失"); });
+    render(<WorkspaceShell bridge={bridge} metadata={metadata} />);
+
+    act(() => callbacks.shift()?.(100));
+
+    expect(screen.getAllByRole("status")[0]?.textContent).toContain("预览不可用 · Atlas 仍可导出");
+    expect(screen.getByRole("region", { name: "问题中心" }).textContent).toContain("浏览器无法启动 WebGL");
+    expect(callbacks).toHaveLength(0);
+  });
 });
 
 describe("PreviewCanvas", () => {
@@ -221,6 +239,27 @@ describe("PreviewCanvas", () => {
     unmount();
     await Promise.resolve();
     expect(bridge.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("渲染帧失败时停止 RAF 并将错误交给可恢复回调", () => {
+    const frameError = new Error("WebGL context 已丢失");
+    const bridge = fakeBridge();
+    vi.mocked(bridge.frame).mockImplementation(() => { throw frameError; });
+    const onFrameError = vi.fn();
+    render(
+      <PreviewCanvas
+        bridge={bridge}
+        metadata={metadata}
+        onSnapshot={vi.fn()}
+        onFrameError={onFrameError}
+      />,
+    );
+
+    act(() => frameCallbacks.shift()?.(100));
+
+    expect(onFrameError).toHaveBeenCalledWith(frameError);
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(frameCallbacks).toHaveLength(0);
   });
 
   it("指针拖动精确更新 Runtime 相机中心", () => {

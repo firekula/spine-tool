@@ -21,6 +21,7 @@ export interface PreviewCanvasProps {
   loadInput?: Omit<RuntimeLoadInput, "canvas">;
   onLoaded?: (metadata: SkeletonMetadata) => void;
   onLoadError?: (error: unknown) => void;
+  onFrameError?: (error: unknown) => void;
   onSnapshot: (snapshot: PlaybackSnapshot) => void;
 }
 
@@ -34,6 +35,7 @@ export function PreviewCanvas({
   loadInput,
   onLoaded,
   onLoadError,
+  onFrameError,
   onSnapshot,
 }: PreviewCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -83,17 +85,26 @@ export function PreviewCanvas({
     if (pendingDispose?.bridge === bridge) pendingDispose.cancelled = true;
     let frameId = 0;
     let previousTimestamp: number | null = null;
+    let stopped = false;
     const renderFrame = (timestamp: number) => {
+      if (stopped) return;
       const deltaSeconds = previousTimestamp === null
         ? 0
         : Math.min(Math.max(0, timestamp - previousTimestamp) / 1000, 0.1);
       previousTimestamp = timestamp;
-      onSnapshot(bridge.frame(deltaSeconds));
+      try {
+        onSnapshot(bridge.frame(deltaSeconds));
+      } catch (error) {
+        stopped = true;
+        onFrameError?.(error);
+        return;
+      }
       frameId = requestAnimationFrame(renderFrame);
     };
     frameId = requestAnimationFrame(renderFrame);
 
     return () => {
+      stopped = true;
       cancelAnimationFrame(frameId);
       const token = { bridge, cancelled: false };
       pendingDisposeRef.current = token;
@@ -102,7 +113,7 @@ export function PreviewCanvas({
         if (pendingDisposeRef.current === token) pendingDisposeRef.current = null;
       });
     };
-  }, [bridge, onSnapshot]);
+  }, [bridge, onFrameError, onSnapshot]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
