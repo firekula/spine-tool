@@ -3,6 +3,7 @@ import { restoreRegion } from "@/lib/atlas/restore-region";
 import type { AtlasDocument, AtlasRegion } from "@/lib/atlas/types";
 import type { ScaleEvidence, ScaleInference } from "@/lib/spine/scale-inference";
 import { createZipPathAllocator } from "@/lib/export/safe-path";
+import type { AppIssue } from "@/lib/issues/types";
 
 export interface ExportAllInput {
   atlas: AtlasDocument;
@@ -46,6 +47,16 @@ export interface ExportReport {
   regions: ExportRegionReport[];
 }
 
+export interface ExportAllResult {
+  blob: Blob;
+  report: ExportReport;
+  issues: AppIssue[];
+}
+
+export interface ExportAllOptions {
+  signal?: AbortSignal;
+}
+
 function regionKey(region: AtlasRegion): string {
   return `${region.name}#${region.index}`;
 }
@@ -56,6 +67,31 @@ function errorMessage(error: unknown): string {
 
 function isPositiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+function abortError(): Error {
+  const error = new Error("导出已取消");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError();
+}
+
+function issueForReport(report: ExportRegionReport): AppIssue | null {
+  if (report.status === "success" || !report.error) return null;
+  const code = report.status === "skipped"
+    ? "MISSING_TEXTURE_PAGE"
+    : /裁切范围超出纹理页/.test(report.error)
+      ? "REGION_OUT_OF_BOUNDS"
+      : "REGION_EXPORT_FAILED";
+  return {
+    code,
+    severity: "warning",
+    subject: `Region「${report.regionName}」`,
+    details: [report.error],
+  };
 }
 
 function evidenceForRegion(inferredScale: ScaleInference, name: string): ScaleEvidence[] {
@@ -102,7 +138,9 @@ function baseReport(region: AtlasRegion, input: ExportAllInput, override: number
 export async function exportAllRegions(
   input: ExportAllInput,
   onProgress: (done: number, total: number) => void,
-): Promise<Blob> {
+  options: ExportAllOptions = {},
+): Promise<ExportAllResult> {
+  throwIfAborted(options.signal);
   if (!isPositiveFinite(input.globalMultiplier)) {
     throw new Error("全局倍率必须是大于 0 的有限数值。");
   }
@@ -113,6 +151,7 @@ export async function exportAllRegions(
   const total = input.atlas.regions.length;
 
   for (let position = 0; position < total; position += 1) {
+    throwIfAborted(options.signal);
     const region = input.atlas.regions[position]!;
     const override = input.regionOverrides.get(regionKey(region))
       ?? input.regionOverrides.get(region.name)
@@ -132,20 +171,25 @@ export async function exportAllRegions(
           throw new Error("最终恢复倍率必须是大于 0 的有限数值。");
         }
         const restored = await restoreRegion({ region, texturePage: texture, restoreMultiplier: finalMultiplier });
+        throwIfAborted(options.signal);
         // ArrayBuffer works in browsers and in the Node test runner; passing a
         // browser Blob directly is not supported by every JSZip build.
-        zip.file(reservedZipPath, await restored.blob.arrayBuffer());
+        const pngBytes = await restored.blob.arrayBuffer();
+        throwIfAborted(options.signal);
+        zip.file(reservedZipPath, pngBytes);
         report.status = "success";
         report.finalMultiplier = finalMultiplier;
         report.zipPath = reservedZipPath;
         report.outputSize = { width: restored.width, height: restored.height };
       }
     } catch (error) {
+      throwIfAborted(options.signal);
       report.status = "failed";
       report.error = errorMessage(error);
     }
 
     reports.push(report);
+    throwIfAborted(options.signal);
     onProgress(position + 1, total);
   }
 
@@ -159,6 +203,13 @@ export async function exportAllRegions(
     { successful: 0, skipped: 0, failed: 0, total },
   );
   const report: ExportReport = { version: 1, inferredScale: input.inferredScale, summary, regions: reports };
+  const issues = reports.flatMap((entry) => {
+    const issue = issueForReport(entry);
+    return issue ? [issue] : [];
+  });
   zip.file("export-report.json", JSON.stringify(report, null, 2));
-  return zip.generateAsync({ type: "blob" });
+  throwIfAborted(options.signal);
+  const blob = await zip.generateAsync({ type: "blob" });
+  throwIfAborted(options.signal);
+  return { blob, report, issues };
 }

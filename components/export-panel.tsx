@@ -1,13 +1,12 @@
 import { Download, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type { AtlasDocument } from "@/lib/atlas/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { exportAllRegions } from "@/lib/export/export-zip";
+import type { ExportResources } from "@/lib/files/import-workflow";
 import type { AppIssue } from "@/lib/issues/types";
 import type { ScaleInference } from "@/lib/spine/scale-inference";
 
 export interface ExportPanelProps {
-  atlas: AtlasDocument | null;
-  textures: Map<string, ImageBitmap> | null;
+  resources: ExportResources | null;
   inferredScale: ScaleInference;
   onIssue?: (issue: AppIssue) => void;
 }
@@ -33,20 +32,41 @@ function downloadZip(blob: Blob): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function ExportPanel({ atlas, textures, inferredScale, onIssue }: ExportPanelProps) {
+export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelProps) {
   const [globalValue, setGlobalValue] = useState("1");
   const [overrideValues, setOverrideValues] = useState<Map<string, string>>(new Map());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [regionQuery, setRegionQuery] = useState("");
+  const mountedRef = useRef(false);
+  const generationRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const atlas = resources?.atlas ?? null;
+  const textures = resources?.textures ?? null;
   const exporting = progress !== null;
 
+  const cancelCurrentExport = useCallback(() => {
+    generationRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cancelCurrentExport();
+    };
+  }, [cancelCurrentExport]);
+
+  useEffect(() => {
+    cancelCurrentExport();
     setGlobalValue("1");
     setOverrideValues(new Map());
+    setProgress(null);
     setNotice(null);
     setRegionQuery("");
-  }, [atlas]);
+  }, [cancelCurrentExport, resources]);
 
   const globalMultiplier = Number(globalValue);
   const globalError = multiplierError(globalValue, false);
@@ -85,25 +105,43 @@ export function ExportPanel({ atlas, textures, inferredScale, onIssue }: ExportP
   };
 
   const startExport = async () => {
-    if (!atlas || !textures || !canExport) return;
+    if (!resources || !atlas || !textures || !canExport) return;
+    cancelCurrentExport();
+    const generation = generationRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const lease = resources.acquire();
+    const isCurrent = () => mountedRef.current
+      && generation === generationRef.current
+      && !controller.signal.aborted;
     setNotice(null);
     setProgress({ done: 0, total: atlas.regions.length });
     try {
-      const blob = await exportAllRegions({
-        atlas,
-        textures,
+      const result = await exportAllRegions({
+        atlas: lease.atlas,
+        textures: lease.textures,
         inferredScale,
         globalMultiplier,
         regionOverrides: overrides,
-      }, (done, total) => setProgress({ done, total }));
-      downloadZip(blob);
-      setNotice("ZIP 已生成；其中包含 PNG 和 export-report.json。请查看报告中的跳过或失败项。");
+      }, (done, total) => {
+        if (isCurrent()) setProgress({ done, total });
+      }, { signal: controller.signal });
+      if (!isCurrent()) return;
+      downloadZip(result.blob);
+      for (const issue of result.issues) onIssue?.(issue);
+      const { successful, skipped, failed } = result.report.summary;
+      setNotice(`导出完成：成功 ${successful} 项，跳过 ${skipped} 项，失败 ${failed} 项。ZIP 已包含详细报告。`);
     } catch (error) {
+      if (!isCurrent() || (error instanceof Error && error.name === "AbortError")) return;
       const detail = error instanceof Error ? error.message : "无法生成 ZIP。";
       setNotice(`导出失败：${detail}`);
       onIssue?.({ code: "ZIP_FAILED", severity: "error", subject: "spine-regions.zip", details: [detail] });
     } finally {
-      setProgress(null);
+      lease.release();
+      if (isCurrent()) {
+        abortRef.current = null;
+        setProgress(null);
+      }
     }
   };
 

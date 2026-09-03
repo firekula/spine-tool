@@ -112,6 +112,16 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
     reason: "Region 的裁切矩形落在所属 PNG 纹理页之外。",
     action: "请检查 Atlas 与 PNG 是否来自同一次导出；其他有效 Region 仍会继续处理。",
   },
+  MISSING_TEXTURE_PAGE: {
+    title: "Region 缺少纹理页",
+    reason: "导出该 Region 时没有找到它所属的 PNG 纹理页。",
+    action: "请重新导入 Atlas 声明的完整 PNG 文件；其他有效 Region 已继续处理。",
+  },
+  REGION_EXPORT_FAILED: {
+    title: "Region 导出失败",
+    reason: "该 Region 在裁切、恢复透明边距、缩放或 PNG 编码阶段失败。",
+    action: "请按错误详情检查 Atlas 数值、倍率和浏览器图像支持；其他有效 Region 已继续处理。",
+  },
   ZIP_FAILED: {
     title: "ZIP 生成失败",
     reason: "浏览器在恢复图片或打包文件时发生错误。",

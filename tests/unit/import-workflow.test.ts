@@ -84,6 +84,25 @@ describe("import workflow resources", () => {
     expect(first.close).toHaveBeenCalledTimes(1);
   });
 
+  it("owner 释放后等待最后一个导出租约结束才关闭 ImageBitmap", async () => {
+    const bitmap = { width: 1, height: 1, close: vi.fn() } as unknown as ImageBitmap;
+    const result = await prepareImport(bundle(), { decodeTexture: async () => bitmap });
+    const firstLease = result.exportResources.acquire();
+    const secondLease = result.exportResources.acquire();
+
+    result.exportResources.release();
+    result.exportResources.release();
+    expect(bitmap.close).not.toHaveBeenCalled();
+
+    firstLease.release();
+    firstLease.release();
+    expect(bitmap.close).not.toHaveBeenCalled();
+
+    secondLease.release();
+    expect(bitmap.close).toHaveBeenCalledTimes(1);
+    expect(() => result.exportResources.acquire()).toThrow(/已释放/);
+  });
+
   it("先加载 Runtime 和创建 bridge，再创建 object URL，并可幂等释放", async () => {
     const order: string[] = [];
     const runtimeBridge = bridge();

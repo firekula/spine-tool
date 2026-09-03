@@ -1,5 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExportAllResult } from "@/lib/export/export-zip";
+import type { ExportResources } from "@/lib/files/import-workflow";
+
+const mocks = vi.hoisted(() => ({ exportAllRegions: vi.fn() }));
+vi.mock("@/lib/export/export-zip", () => ({ exportAllRegions: mocks.exportAllRegions }));
 import { ExportPanel } from "@/components/export-panel";
 import type { AtlasDocument } from "@/lib/atlas/types";
 import type { ScaleInference } from "@/lib/spine/scale-inference";
@@ -24,10 +30,34 @@ const inferredScale: ScaleInference = {
 };
 
 function renderPanel() {
-  return render(<ExportPanel atlas={atlas} textures={new Map([["page.png", {} as ImageBitmap]])} inferredScale={inferredScale} />);
+  return render(<ExportPanel resources={resources(atlas)} inferredScale={inferredScale} />);
 }
 
-afterEach(() => cleanup());
+function resources(document: AtlasDocument): ExportResources {
+  const textures = new Map([["page.png", {} as ImageBitmap]]);
+  return {
+    atlas: document,
+    textures,
+    acquire: () => ({ atlas: document, textures, release: vi.fn() }),
+    release: vi.fn(),
+  };
+}
+
+beforeEach(() => {
+  vi.stubGlobal("URL", {
+    ...URL,
+    createObjectURL: vi.fn(() => "blob:zip"),
+    revokeObjectURL: vi.fn(),
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  cleanup();
+  mocks.exportAllRegions.mockReset();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("ExportPanel", () => {
   it("可搜索很长的 Region 名称且保留完整 title", () => {
@@ -61,15 +91,45 @@ describe("ExportPanel", () => {
   });
 
   it("切换到新 Atlas 时清除搜索和倍率编辑状态", async () => {
-    const textures = new Map([["page.png", {} as ImageBitmap]]);
-    const view = render(<ExportPanel atlas={atlas} textures={textures} inferredScale={inferredScale} />);
+    const view = render(<ExportPanel resources={resources(atlas)} inferredScale={inferredScale} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索 Region" }), { target: { value: "very-long" } });
     fireEvent.change(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" }), { target: { value: "3" } });
 
-    view.rerender(<ExportPanel atlas={{ ...atlas, regions: [...atlas.regions] }} textures={textures} inferredScale={inferredScale} />);
+    view.rerender(<ExportPanel resources={resources({ ...atlas, regions: [...atlas.regions] })} inferredScale={inferredScale} />);
 
     await waitFor(() => expect(screen.getByRole("searchbox", { name: "搜索 Region" })).toHaveProperty("value", ""));
     expect(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" })).toHaveProperty("value", "1");
     expect(screen.getByText("body/head")).toBeTruthy();
+  });
+
+  it("按结构化结果上报 Region warning，并准确显示成功、跳过和失败数", async () => {
+    const issue = {
+      code: "REGION_OUT_OF_BOUNDS",
+      severity: "warning" as const,
+      subject: "Region「broken」",
+      details: ["裁切范围超出纹理页"],
+    };
+    mocks.exportAllRegions.mockResolvedValueOnce({
+      blob: new Blob(["zip"]),
+      report: {
+        version: 1,
+        inferredScale,
+        summary: { successful: 1, skipped: 1, failed: 1, total: 3 },
+        regions: [],
+      },
+      issues: [issue],
+    } satisfies ExportAllResult);
+    const onIssue = vi.fn();
+    render(<ExportPanel
+      resources={resources(atlas)}
+      inferredScale={inferredScale}
+      onIssue={onIssue}
+    />);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "导出全部 ZIP" }));
+
+    await screen.findByText("导出完成：成功 1 项，跳过 1 项，失败 1 项。ZIP 已包含详细报告。");
+    expect(onIssue).toHaveBeenCalledWith(issue);
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
   });
 });

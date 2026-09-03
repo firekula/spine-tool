@@ -26,4 +26,11 @@ describe("getIssueMessage", () => {
       action: "请检查所选文件后重试；若问题持续，请记录错误代码。",
     });
   });
+
+  it.each([
+    ["MISSING_TEXTURE_PAGE", "Region 缺少纹理页"],
+    ["REGION_EXPORT_FAILED", "Region 导出失败"],
+  ])("%s 使用专属中文消息而不是未知错误兜底", (code, title) => {
+    expect(getIssueMessage({ code, severity: "warning", subject: "hero" })).toMatchObject({ title });
+  });
 });

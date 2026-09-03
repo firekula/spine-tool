@@ -63,9 +63,15 @@ function readSpineString(bytes: Uint8Array, offset: number): DecodedString | nul
 
 function readSkelHeaderVersion(bytes: Uint8Array): string | null {
   const hash = readSpineString(bytes, 0);
-  if (!hash) return null;
-  const version = readSpineString(bytes, hash.next);
-  return version?.value ?? null;
+  const legacyVersion = hash ? readSpineString(bytes, hash.next)?.value : null;
+  if (legacyVersion && /^\d+\.\d+(?:\.\d+)?$/.test(legacyVersion)) return legacyVersion;
+
+  // Spine 4.x replaced the serialized hash string with two int32 values.
+  // The version string therefore starts at byte 8 in current SKEL files.
+  const numericHashVersion = readSpineString(bytes, 8)?.value;
+  return numericHashVersion && /^\d+\.\d+(?:\.\d+)?$/.test(numericHashVersion)
+    ? numericHashVersion
+    : null;
 }
 
 function findAsciiVersion(bytes: Uint8Array): string | null {

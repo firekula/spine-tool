@@ -14,10 +14,14 @@ import {
   type SupportedSpineVersion,
 } from "@/lib/spine/version";
 
-export interface ExportResources {
+export interface ExportResourceLease {
   atlas: AtlasDocument;
   textures: Map<string, ImageBitmap>;
   release(): void;
+}
+
+export interface ExportResources extends ExportResourceLease {
+  acquire(): ExportResourceLease;
 }
 
 export interface PreparedImport {
@@ -61,16 +65,39 @@ function releasableExportResources(
   atlas: AtlasDocument,
   textures: Map<string, ImageBitmap>,
 ): ExportResources {
-  let released = false;
-  return {
+  let ownerReleased = false;
+  let activeLeases = 0;
+  let closed = false;
+  const closeIfUnused = (): void => {
+    if (closed || !ownerReleased || activeLeases !== 0) return;
+    closed = true;
+    for (const texture of textures.values()) texture.close();
+  };
+  const resources: ExportResources = {
     atlas,
     textures,
+    acquire() {
+      if (ownerReleased) throw new Error("导出资源已释放");
+      activeLeases += 1;
+      let leaseReleased = false;
+      return {
+        atlas,
+        textures,
+        release() {
+          if (leaseReleased) return;
+          leaseReleased = true;
+          activeLeases -= 1;
+          closeIfUnused();
+        },
+      };
+    },
     release() {
-      if (released) return;
-      released = true;
-      for (const texture of textures.values()) texture.close();
+      if (ownerReleased) return;
+      ownerReleased = true;
+      closeIfUnused();
     },
   };
+  return resources;
 }
 
 /** Parses and decodes export resources independently from the preview Runtime. */

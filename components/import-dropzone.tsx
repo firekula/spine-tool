@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { AppIssue } from "@/lib/issues/types";
 import {
   classifyImport,
@@ -46,15 +46,27 @@ export function ImportDropzone({ inputId: suppliedInputId, disabled = false, onI
   const inputId = suppliedInputId ?? generatedInputId;
   const inputRef = useRef<HTMLInputElement>(null);
   const importLockRef = useRef(false);
+  const mountedRef = useRef(true);
+  const generationRef = useRef(0);
   const [summary, setSummary] = useState<SelectionSummary>({ pngCount: 0 });
   const [missingPages, setMissingPages] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+      importLockRef.current = false;
+    };
+  }, []);
+
   const processFiles = async (files: File[]) => {
     if (disabled || importLockRef.current) return;
 
+    const generation = ++generationRef.current;
     importLockRef.current = true;
     setSummary(getSelectionSummary(files));
     setMissingPages([]);
@@ -62,16 +74,20 @@ export function ImportDropzone({ inputId: suppliedInputId, disabled = false, onI
     setIsImporting(true);
     try {
       const bundle = await classifyImport(files);
+      if (!mountedRef.current || generation !== generationRef.current) return;
       await onImport(bundle);
     } catch (error) {
+      if (!mountedRef.current || generation !== generationRef.current) return;
       const issue = asIssue(error);
       const message = getIssueMessage(issue);
       setMissingPages(issue.code === "MISSING_TEXTURE_PAGES" ? issue.details ?? [] : []);
       setErrorMessage(`${message.title}：${message.action}`);
       onError?.(issue);
     } finally {
-      importLockRef.current = false;
-      setIsImporting(false);
+      if (mountedRef.current && generation === generationRef.current) {
+        importLockRef.current = false;
+        setIsImporting(false);
+      }
     }
   };
 

@@ -120,7 +120,12 @@ export interface RuntimeAdapter {
     GLTexture: RuntimeConstructor<{ dispose?(): void }>;
     SceneRenderer: RuntimeConstructor<RuntimeRenderer>;
   };
-  isRegionAttachment(attachment: unknown): attachment is { width: number; height: number };
+  isRegionAttachment(attachment: unknown): attachment is {
+    width: number;
+    height: number;
+    path?: string;
+    region?: { name?: string } | null;
+  };
   updateSkeleton(skeleton: RuntimeSkeleton, delta: number): void;
   updateWorldTransform(skeleton: RuntimeSkeleton): void;
 }
@@ -340,10 +345,13 @@ function regionAttachmentMetadata(
       if (!adapter.isRegionAttachment(entry.attachment)) continue;
       const slot = data.slots[entry.slotIndex];
       if (!slot) continue;
+      const atlasRegionName = entry.attachment.path?.trim()
+        || entry.attachment.region?.name?.trim();
+      if (!atlasRegionName) continue;
       result.push({
         skin: skin.name,
         slot: slot.name,
-        name: entry.name,
+        name: atlasRegionName,
         width: entry.attachment.width,
         height: entry.attachment.height,
       });
@@ -626,11 +634,17 @@ class RuntimeBridge implements SpineRuntimeBridge {
   private snapshot(): PlaybackSnapshot {
     const duration = this.entry?.animation?.duration ?? 0;
     const rawTime = this.entry?.trackTime ?? 0;
-    const time = this.entry?.loop && duration > 0 ? rawTime % duration : rawTime;
+    const looping = Boolean(this.entry?.loop);
+    const ended = Boolean(this.entry) && !looping && rawTime >= duration;
+    const time = looping && duration > 0
+      ? rawTime % duration
+      : this.entry
+        ? Math.min(rawTime, duration)
+        : rawTime;
     return {
       animation: this.entry?.animation?.name ?? null,
       duration,
-      playing: Boolean(this.entry) && !this.paused,
+      playing: Boolean(this.entry) && !this.paused && !ended,
       time,
     };
   }

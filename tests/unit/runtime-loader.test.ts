@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntimeBridge, type RuntimeAdapter } from "@/lib/spine/runtime-factory";
 import { loadRuntimeModule } from "@/lib/spine/runtime-loader";
+import { inferExportScale } from "@/lib/spine/scale-inference";
 import type { RuntimeLoadInput } from "@/lib/spine/bridge-types";
 
 const EXPECTED_SOURCES = {
@@ -100,6 +101,9 @@ describe("Runtime 资产验证", () => {
 interface HarnessOptions {
   applyRestoresAttachment?: boolean;
   atlasMode?: "constructor-loader" | "page-setter";
+  attachmentKey?: string;
+  attachmentPath?: string;
+  attachmentRegionName?: string;
   onTextureCreated?: () => void;
   pages?: Array<{ name: string }>;
   bounds?: { x: number; y: number; width: number; height: number };
@@ -112,7 +116,12 @@ function createHarness(options: HarnessOptions = {}) {
   const drawPremultipliedAlpha: boolean[] = [];
   const skeletonDeltas: number[] = [];
   const textureMipMaps: boolean[] = [];
-  const visibleAttachment = { width: 64, height: 32 };
+  const visibleAttachment = {
+    width: 64,
+    height: 32,
+    path: options.attachmentPath ?? "body-region",
+    region: options.attachmentRegionName ? { name: options.attachmentRegionName } : undefined,
+  };
   const camera = {
     position: { x: 0, y: 0, z: 0 },
     zoom: 1,
@@ -165,7 +174,7 @@ function createHarness(options: HarnessOptions = {}) {
 
     getAttachments() {
       return this.name === "default"
-        ? [{ slotIndex: 0, name: "body-region", attachment: visibleAttachment }]
+        ? [{ slotIndex: 0, name: options.attachmentKey ?? "body-region", attachment: visibleAttachment }]
         : [];
     }
   }
@@ -391,6 +400,47 @@ function installDeferredImages(): Map<string, { succeed(): void; fail(): void }>
 }
 
 describe("createRuntimeBridge", () => {
+  it.each([
+    { version: "3.8", attachmentPath: "atlas/path-38", attachmentRegionName: undefined },
+    { version: "4.0", attachmentPath: "", attachmentRegionName: "atlas/path-40" },
+    { version: "4.1", attachmentPath: "atlas/path-41", attachmentRegionName: "ignored-region" },
+    { version: "4.2", attachmentPath: "atlas/path-42", attachmentRegionName: undefined },
+  ] as const)("$version 元数据使用 RegionAttachment 的真实 Atlas 路径而不是 skin alias key", async ({
+    version,
+    attachmentPath,
+    attachmentRegionName,
+  }) => {
+    const harness = createHarness({
+      attachmentKey: "skin-alias",
+      attachmentPath,
+      attachmentRegionName,
+    });
+    const bridge = createRuntimeBridge(version, harness.runtime);
+
+    const metadata = await bridge.load(harness.input);
+
+    const atlasName = attachmentPath || attachmentRegionName;
+    expect(metadata.regionAttachments).toEqual([{
+      skin: "default",
+      slot: "body",
+      name: atlasName,
+      width: 64,
+      height: 32,
+    }]);
+    const inference = inferExportScale(metadata.regionAttachments.flatMap((attachment) => (
+      attachment.name === atlasName
+        ? [{
+            regionName: atlasName,
+            atlasWidth: 32,
+            atlasHeight: 16,
+            attachmentWidth: attachment.width,
+            attachmentHeight: attachment.height,
+          }]
+        : []
+    )));
+    expect(inference).toMatchObject({ restoreMultiplier: 2, sampleCount: 1 });
+  });
+
   it("在动画重新应用 attachment 后的每一帧清空隐藏插槽", async () => {
     const harness = createHarness({ applyRestoresAttachment: true });
     const bridge = createRuntimeBridge("4.1", harness.runtime);
@@ -610,6 +660,16 @@ describe("createRuntimeBridge", () => {
       "skin.add:alternate",
       "skeleton.skin:bridge-composite",
     ]);
+  });
+
+  it("非循环动画到达结尾后把时间钳制到 duration 并停止播放", async () => {
+    const harness = createHarness();
+    const bridge = createRuntimeBridge("4.2", harness.runtime);
+    await bridge.load(harness.input);
+    bridge.play("idle", false);
+
+    expect(bridge.frame(2.75)).toMatchObject({ duration: 2, time: 2, playing: false });
+    expect(bridge.frame(1)).toMatchObject({ duration: 2, time: 2, playing: false });
   });
 
   it("返回当前整体 bounds，原位切换 loop，并用 Runtime 相机设置 view", async () => {

@@ -94,6 +94,7 @@ describe("WorkspaceShell import integration", () => {
       exportResources: {
         atlas: { pages: [{ name: "page.png", width: 1, height: 1, custom: {} }], regions: [] },
         textures: new Map([["page.png", {} as ImageBitmap]]),
+        acquire: vi.fn(),
         release: exportRelease,
       },
     } satisfies PreparedImport;
@@ -136,6 +137,7 @@ describe("WorkspaceShell import integration", () => {
       exportResources: {
         atlas: { pages: [{ name: "page.png", width: 1, height: 1, custom: {} }], regions: [] },
         textures: new Map([['page.png', {} as ImageBitmap]]),
+        acquire: vi.fn(),
         release: exportRelease,
       },
     } satisfies PreparedImport);
@@ -174,6 +176,7 @@ describe("WorkspaceShell import integration", () => {
       exportResources: {
         atlas: { pages: [], regions: [] },
         textures: new Map(),
+        acquire: vi.fn(),
         release: exportRelease,
       },
     });
@@ -195,6 +198,7 @@ describe("WorkspaceShell import integration", () => {
       exportResources: {
         atlas: { pages: [], regions: [] },
         textures: new Map(),
+        acquire: vi.fn(),
         release: exportRelease,
       },
     });

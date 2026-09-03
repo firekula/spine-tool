@@ -39,10 +39,33 @@ describe("parseAtlas", () => {
   });
 
   it.each([
-    [oldAtlas, { x: 4, y: 8, packedWidth: 12, packedHeight: 20, originalWidth: 32, originalHeight: 40, offsetLeft: 3, offsetBottom: 5, rotation: 90 }],
-    [newAtlas, { x: 4, y: 8, packedWidth: 12, packedHeight: 20, originalWidth: 32, originalHeight: 40, offsetLeft: 3, offsetBottom: 5, rotation: 90 }],
+    [oldAtlas, { x: 4, y: 8, packedWidth: 20, packedHeight: 12, originalWidth: 32, originalHeight: 40, offsetLeft: 3, offsetBottom: 5, rotation: 90 }],
+    [newAtlas, { x: 4, y: 8, packedWidth: 20, packedHeight: 12, originalWidth: 32, originalHeight: 40, offsetLeft: 3, offsetBottom: 5, rotation: 90 }],
   ])("把 Atlas 字段标准化", (source, expected) => {
     expect(parseAtlas(source).regions[0]).toMatchObject(expected);
+  });
+
+  it("接受 Spine 4.2 省略 offsets 的未裁边 Region，并补齐零边距与原始尺寸", () => {
+    const document = parseAtlas([
+      "page.png",
+      "\tsize: 64, 64",
+      "\tfilter: Linear, Linear",
+      "\tpma: true",
+      "region",
+      "\tbounds: 5, 6, 7, 8",
+    ].join("\n"));
+
+    expect(document.regions[0]).toMatchObject({
+      name: "region",
+      x: 5,
+      y: 6,
+      packedWidth: 7,
+      packedHeight: 8,
+      originalWidth: 7,
+      originalHeight: 8,
+      offsetLeft: 0,
+      offsetBottom: 0,
+    });
   });
 
   it("支持多页、保留未知字段，并将顶格 Region 属性视为 Region 属性", () => {
@@ -74,7 +97,7 @@ describe("parseAtlas", () => {
       name: "first", pageName: "page-a.png", rotation: 0, custom: { "custom-key": "custom-value" },
     });
     expect(document.regions[1]).toMatchObject({
-      name: "second", pageName: "page-b.png", x: 5, y: 6, packedWidth: 7, packedHeight: 8,
+      name: "second", pageName: "page-b.png", x: 5, y: 6, packedWidth: 8, packedHeight: 7,
       originalWidth: 9, originalHeight: 10, offsetLeft: 1, offsetBottom: 2, rotation: 270,
     });
   });

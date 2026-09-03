@@ -50,17 +50,42 @@ function extension(name: string): string {
 export function extractAtlasPageNames(atlasText: string): string[] {
   const lines = atlasText.replace(/\r\n?/g, "\n").split("\n");
   const pages: string[] = [];
+  const pageOnlyKeys = new Set(["format", "filter", "repeat", "pma", "scale"]);
+  const regionOnlyKeys = new Set(["rotate", "xy", "bounds", "orig", "offset", "offsets", "index", "split", "pad"]);
+  let hasPage = false;
+  let afterBlank = true;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
     const candidate = line.trim();
-    if (!candidate || /^\s/.test(line)) continue;
-
-    let next = index + 1;
-    while (next < lines.length && !lines[next]?.trim()) next += 1;
-    if (/^size\s*:/i.test(lines[next] ?? "")) {
-      pages.push(normalizedName(candidate));
+    if (!candidate) {
+      afterBlank = true;
+      continue;
     }
+    if (/^\s*[^:]+\s*:/.test(line)) {
+      afterBlank = false;
+      continue;
+    }
+
+    let pageHeader = !hasPage;
+    if (hasPage && afterBlank) {
+      let hasPageOnlyKey = false;
+      let hasRegionOnlyKey = false;
+      for (let next = index + 1; next < lines.length && lines[next]?.trim(); next += 1) {
+        const match = lines[next]?.match(/^\s*([^:]+)\s*:/);
+        if (!match) break;
+        const key = match[1]!.trim().toLowerCase();
+        hasPageOnlyKey ||= pageOnlyKeys.has(key);
+        hasRegionOnlyKey ||= regionOnlyKeys.has(key);
+      }
+      pageHeader = hasPageOnlyKey || !hasRegionOnlyKey;
+    }
+
+    if (pageHeader) {
+      pages.push(normalizedName(candidate));
+      hasPage = true;
+    }
+    afterBlank = false;
   }
 
   return pages;

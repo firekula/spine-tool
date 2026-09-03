@@ -51,10 +51,10 @@ describe("exportAllRegions", () => {
     mocks.restoreRegion
       .mockResolvedValueOnce({ blob: new Blob(["first"], { type: "image/png" }), width: 40, height: 48, plan: {} })
       .mockResolvedValueOnce({ blob: new Blob(["second"], { type: "image/png" }), width: 20, height: 24, plan: {} })
-      .mockRejectedValueOnce(new Error("裁切范围无效"));
+      .mockRejectedValueOnce(new Error("Region「broken」的裁切范围超出纹理页 page.png（64×64）"));
     const progress = vi.fn();
 
-    const blob = await exportAllRegions({
+    const result = await exportAllRegions({
       atlas,
       textures: new Map([["page.png", {} as ImageBitmap]]),
       inferredScale,
@@ -62,7 +62,7 @@ describe("exportAllRegions", () => {
       regionOverrides: new Map([["body/head#1", 3]]),
     }, progress);
 
-    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer());
     const pngPaths = Object.keys(zip.files).filter((path) => path.endsWith(".png")).sort();
     const report = JSON.parse(await zip.file("export-report.json")!.async("text"));
 
@@ -70,9 +70,24 @@ describe("exportAllRegions", () => {
     expect(report.summary).toEqual({ successful: 2, skipped: 1, failed: 1, total: 4 });
     expect(report.regions).toHaveLength(4);
     expect(report.regions.filter((entry: { status: string }) => entry.status === "success").map((entry: { zipPath: string }) => entry.zipPath).sort()).toEqual(pngPaths);
-    expect(report.regions.find((entry: { regionName: string }) => entry.regionName === "broken")).toMatchObject({ status: "failed", error: "裁切范围无效" });
+    expect(report.regions.find((entry: { regionName: string }) => entry.regionName === "broken")).toMatchObject({ status: "failed", error: expect.stringContaining("裁切范围超出纹理页") });
     expect(report.regions.find((entry: { regionName: string }) => entry.regionName === "missing-page")).toMatchObject({ status: "skipped" });
     expect(report.regions[1]).toMatchObject({ finalMultiplier: 3, userOverrideMultiplier: 3 });
+    expect(result.report).toEqual(report);
+    expect(result.issues).toEqual([
+      {
+        code: "REGION_OUT_OF_BOUNDS",
+        severity: "warning",
+        subject: "Region「broken」",
+        details: ["Region「broken」的裁切范围超出纹理页 page.png（64×64）"],
+      },
+      {
+        code: "MISSING_TEXTURE_PAGE",
+        severity: "warning",
+        subject: "Region「missing-page」",
+        details: ["缺少纹理页「missing.png」。"],
+      },
+    ]);
     expect(progress.mock.calls).toEqual([[1, 4], [2, 4], [3, 4], [4, 4]]);
   });
 
@@ -88,18 +103,40 @@ describe("exportAllRegions", () => {
       })),
     };
 
-    const blob = await exportAllRegions({
+    const result = await exportAllRegions({
       atlas: collisionAtlas,
       textures: new Map([["page.png", {} as ImageBitmap]]),
       inferredScale,
       globalMultiplier: 1,
       regionOverrides: new Map(),
     }, vi.fn());
-    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer());
     const report = JSON.parse(await zip.file("export-report.json")!.async("text"));
     const pngPaths = Object.keys(zip.files).filter((path) => path.endsWith(".png")).sort();
 
     expect(pngPaths).toEqual(["head-2-2.png", "head-2.png", "head.png"]);
     expect(new Set(report.regions.map((entry: { zipPath: string }) => entry.zipPath)).size).toBe(3);
+  });
+
+  it("取消后不再恢复下一项，也不返回残缺 ZIP", async () => {
+    mocks.restoreRegion.mockReset();
+    mocks.restoreRegion.mockResolvedValue({
+      blob: new Blob(["png"], { type: "image/png" }), width: 20, height: 24, plan: {},
+    });
+    const controller = new AbortController();
+    const progress = vi.fn((done: number) => {
+      if (done === 1) controller.abort();
+    });
+
+    await expect(exportAllRegions({
+      atlas: { ...atlas, regions: atlas.regions.slice(0, 2) },
+      textures: new Map([["page.png", {} as ImageBitmap]]),
+      inferredScale,
+      globalMultiplier: 1,
+      regionOverrides: new Map(),
+    }, progress, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(mocks.restoreRegion).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledTimes(1);
   });
 });

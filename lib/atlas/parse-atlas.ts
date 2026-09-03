@@ -129,6 +129,21 @@ export function parseAtlas(text: string): AtlasDocument {
 
   const finishRegion = (): void => {
     if (!region) return;
+    if (region.packedWidth !== undefined && region.packedHeight !== undefined) {
+      const logicalWidth = region.packedWidth;
+      const logicalHeight = region.packedHeight;
+      const swapsAxes = region.rotation === 90 || region.rotation === 270;
+      region.originalWidth ??= logicalWidth;
+      region.originalHeight ??= logicalHeight;
+      region.offsetLeft ??= 0;
+      region.offsetBottom ??= 0;
+      if (swapsAxes) {
+        // Atlas `size`/`bounds` are logical dimensions. The stored rectangle
+        // swaps its axes when the packer rotates it by 90° or 270°.
+        region.packedWidth = logicalHeight;
+        region.packedHeight = logicalWidth;
+      }
+    }
     const missing = [
       region.x === undefined || region.y === undefined ? "xy/bounds" : undefined,
       region.packedWidth === undefined || region.packedHeight === undefined ? "size/bounds" : undefined,

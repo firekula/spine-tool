@@ -472,8 +472,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
           </button>
         </div>
         <ExportPanel
-          atlas={exportResourcesState?.atlas ?? null}
-          textures={exportResourcesState?.textures ?? null}
+          resources={exportResourcesState}
           inferredScale={inferredScale}
           onIssue={(issue) => dispatch({ type: "REPORT_ISSUE", issue })}
         />

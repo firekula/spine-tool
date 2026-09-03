@@ -10,6 +10,17 @@ function png(name: string): File {
 }
 
 describe("classifyImport", () => {
+  it("识别 Spine 4.x 使用缩进 size 属性的纹理页", async () => {
+    const bundle = await classifyImport([
+      file("hero.atlas", "page.png\n\tsize: 64, 64\n\tfilter: Linear, Linear\nregion\n\tbounds: 0, 0, 1, 1"),
+      file("hero.json", '{"skeleton":{"spine":"4.2.0"}}', "application/json"),
+      png("page.png"),
+    ]);
+
+    expect([...bundle.textureFiles.keys()]).toEqual(["page.png"]);
+    expect(bundle.unusedTextures).toEqual([]);
+  });
+
   it("只提取页面头，而不将 Region 视作纹理页", () => {
     const atlas = [
       "page.png",

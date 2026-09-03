@@ -1,0 +1,51 @@
+{
+  "repository": "https://github.com/EsotericSoftware/spine-runtimes",
+  "assetDirectory": "examples/spineboy/export",
+  "license": {
+    "source": "https://github.com/EsotericSoftware/spine-runtimes/blob/e7dc1435fa4a0083ab431f1b28e083c14a1f5c68/LICENSE",
+    "includedAt": "public/licenses/SPINE-RUNTIMES-LICENSE.txt"
+  },
+  "fixtures": {
+    "3.8": {
+      "revision": "8b4844bd4b193ba9e54487ed397a777993cbad56",
+      "editorVersion": "3.8.55",
+      "files": {
+        "spineboy-ess.json": "0f1cabaccdad880120f7e57ce9ffb55606227076aeea2246eab610c29d0bde6e",
+        "spineboy-ess.skel": "23bd4ac417082659dfb611282de188b6281bcd3330528c5f6bd854da0c7ff0f5",
+        "spineboy-pma.atlas": "829ee567e7e1652f8b3bb1bc0ac154b2cb4a603567f6cb1793544cdb0121ae66",
+        "spineboy-pma.png": "329772025bc8b329fb9c94f6b0dec5eb8bdbc0cd401291adb24abf327250d195"
+      }
+    },
+    "4.0": {
+      "revision": "425ce416bb218b28caeec47b317aa57cd7140375",
+      "editorVersion": "4.0.31",
+      "files": {
+        "spineboy-ess.json": "1e51201274a1c10742ed4456ce65d377184f124230c6f784c13426cef8a29a30",
+        "spineboy-ess.skel": "bb0d910611247db64dc442737a2b8e2b129a0658d2913fdf40f5307447a2f672",
+        "spineboy-pma.atlas": "d67e56e6b9a353d4cc9bd42d7140208ea3aa403f2e1d8e8e4d85149f0d34a521",
+        "spineboy-pma.png": "c28426b3bbdb5aad672e9e24246fa519ebcbc5fffc8624b2e024a7aafef25849"
+      }
+    },
+    "4.1": {
+      "revision": "77a5db0ec6d16331f5efbaa7662bba9355bd3424",
+      "editorVersion": "4.1.17",
+      "files": {
+        "spineboy-ess.json": "f5c473a4925e85d7be2f4eea0873e1318ccc2744a9cc87f294ff82612f27a2b6",
+        "spineboy-ess.skel": "41a0f1de0b64ef09578791d515309c2c41c46b72d919e2367f5c6196e35dede0",
+        "spineboy-pma.atlas": "d67e56e6b9a353d4cc9bd42d7140208ea3aa403f2e1d8e8e4d85149f0d34a521",
+        "spineboy-pma.png": "8f34aacb646e10f68764032cbb7da9040a66575d4d5d42540410d7921b869076"
+      }
+    },
+    "4.2": {
+      "revision": "e7dc1435fa4a0083ab431f1b28e083c14a1f5c68",
+      "editorVersion": "4.2.22",
+      "files": {
+        "spineboy-ess.json": "e2710415faa748ae8a183283453aa40164a8f92301440a27d2670d9f0236ef0e",
+        "spineboy-ess.skel": "39d05198a353e9525637b9c8a808a807a24f5d86d586c828d4673103d8bae4a2",
+        "spineboy-pma.atlas": "a53dd09fa8d304b395062c0a35a4c3952e979dda00e74b9cd95a5bc264cd6d5d",
+        "spineboy-pma.png": "eb8a9b9f105517acda7ab5c9961f6c487a6bc2ac28a6a123f6303a6af805dd3f"
+      }
+    }
+  },
+  "sourceUrlPattern": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/{revision}/examples/spineboy/export/{filename}"
+}
