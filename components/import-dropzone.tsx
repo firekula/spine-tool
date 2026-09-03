@@ -7,6 +7,7 @@ import {
 } from "@/lib/files/import-files";
 
 export interface ImportDropzoneProps {
+  inputId?: string;
   disabled?: boolean;
   onImport: (bundle: ImportBundle) => void | Promise<void>;
   onError?: (issue: AppIssue) => void;
@@ -39,12 +40,14 @@ function asIssue(error: unknown): AppIssue {
   };
 }
 
-export function ImportDropzone({ disabled = false, onImport, onError }: ImportDropzoneProps) {
-  const inputId = useId();
+export function ImportDropzone({ inputId: suppliedInputId, disabled = false, onImport, onError }: ImportDropzoneProps) {
+  const generatedInputId = useId();
+  const inputId = suppliedInputId ?? generatedInputId;
   const inputRef = useRef<HTMLInputElement>(null);
   const importLockRef = useRef(false);
   const [summary, setSummary] = useState<SelectionSummary>({ pngCount: 0 });
   const [missingPages, setMissingPages] = useState<string[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -54,6 +57,7 @@ export function ImportDropzone({ disabled = false, onImport, onError }: ImportDr
     importLockRef.current = true;
     setSummary(getSelectionSummary(files));
     setMissingPages([]);
+    setErrorMessage(null);
     setIsImporting(true);
     try {
       const bundle = await classifyImport(files);
@@ -61,6 +65,7 @@ export function ImportDropzone({ disabled = false, onImport, onError }: ImportDr
     } catch (error) {
       const issue = asIssue(error);
       setMissingPages(issue.code === "MISSING_TEXTURE_PAGES" ? issue.details ?? [] : []);
+      setErrorMessage(error instanceof Error ? error.message : "无法读取所选文件。");
       onError?.(issue);
     } finally {
       importLockRef.current = false;
@@ -109,6 +114,7 @@ export function ImportDropzone({ disabled = false, onImport, onError }: ImportDr
         {isImporting ? "正在验证…" : "选择文件"}
       </button>
       <p className="import-local-note">文件仅在本地处理。</p>
+      {errorMessage && <p className="import-error" role="alert">{errorMessage}</p>}
       <dl className="import-summary" aria-label="已识别的导入文件">
         <div><dt>Atlas</dt><dd>{summary.atlas ?? "未选择"}</dd></div>
         <div><dt>骨骼</dt><dd>{summary.skeleton ?? "未选择"}</dd></div>

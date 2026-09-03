@@ -15,8 +15,9 @@ export class ImportValidationError extends Error implements AppIssue {
   constructor(
     public readonly code: string,
     public readonly details?: string[],
+    message = code,
   ) {
-    super(code);
+    super(message);
     this.name = "ImportValidationError";
   }
 }
@@ -104,6 +105,10 @@ export async function classifyImport(files: File[]): Promise<ImportBundle> {
   const skeletonKind = extension(skeletonFile.name) as ImportBundle["skeletonKind"];
   const atlasText = await atlasFile.text();
   const textures = namedFiles.filter(({ name }) => extension(name) === "png");
+  if (textures.length === 0) {
+    const message = "未检测到 PNG 纹理文件。请至少选择一张 PNG 纹理。";
+    throw new ImportValidationError("MISSING_TEXTURE_FILES", [message], message);
+  }
   const textureFiles = new Map<string, File>();
   const usedTextures = new Set<File>();
   const missingPages: string[] = [];

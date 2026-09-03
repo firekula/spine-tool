@@ -38,6 +38,16 @@ describe("classifyImport", () => {
     });
   });
 
+  it("没有 PNG 纹理时拒绝导入，即使 Atlas 未声明页面", async () => {
+    await expect(classifyImport([
+      file("hero.atlas", ""),
+      file("hero.json", "{}"),
+    ])).rejects.toMatchObject({
+      code: "MISSING_TEXTURE_FILES",
+      details: ["未检测到 PNG 纹理文件。请至少选择一张 PNG 纹理。"],
+    });
+  });
+
   it("匹配 Atlas 声明的全部页面，并报告未使用的 PNG", async () => {
     const files = [
       file("hero.atlas", "pages/page-a.png\nsize: 16,16\n\npage-b.png\nsize: 16,16"),

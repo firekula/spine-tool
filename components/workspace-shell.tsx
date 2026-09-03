@@ -6,8 +6,22 @@ import {
   RotateCcw,
   Settings2,
 } from "lucide-react";
+import { useState } from "react";
+import { ImportDropzone } from "@/components/import-dropzone";
+import type { AppIssue } from "@/lib/issues/types";
+import type { ImportBundle } from "@/lib/files/import-files";
 
 export function WorkspaceShell() {
+  const [status, setStatus] = useState("等待导入");
+
+  const handleImport = (bundle: ImportBundle) => {
+    setStatus(`已识别 ${bundle.skeletonFile.name} 和 ${bundle.textureFiles.size} 张纹理`);
+  };
+
+  const handleImportError = (issue: AppIssue) => {
+    setStatus(`导入失败：${issue.details?.[0] ?? issue.code}`);
+  };
+
   return (
     <main className="workspace-shell">
       <header className="topbar">
@@ -19,13 +33,13 @@ export function WorkspaceShell() {
           </p>
         </div>
         <div className="toolbar-actions">
-          <button type="button" className="button button-primary">
+          <label className="button button-primary" htmlFor="spine-import-files">
             <FileUp size={18} aria-hidden="true" /> 导入文件
-          </button>
+          </label>
           <button type="button" className="button">
             <RotateCcw size={18} aria-hidden="true" /> 重新导入
           </button>
-          <span className="status">等待导入</span>
+          <span className="status">{status}</span>
         </div>
       </header>
 
@@ -47,9 +61,11 @@ export function WorkspaceShell() {
           <FileUp size={42} aria-hidden="true" />
           <h2>尚未导入 Spine 文件</h2>
           <p>选择 Atlas、JSON 或 SKEL 以及对应 PNG 纹理页，所有文件仅在本地处理。</p>
-          <button type="button" className="button button-primary">
-            <FileUp size={18} aria-hidden="true" /> 选择文件
-          </button>
+          <ImportDropzone
+            inputId="spine-import-files"
+            onImport={handleImport}
+            onError={handleImportError}
+          />
         </div>
       </section>
 
