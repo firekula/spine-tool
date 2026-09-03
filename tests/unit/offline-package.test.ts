@@ -79,11 +79,20 @@ describe("离线包脚本", () => {
       { html: "<script src=https://example.invalid/unquoted-app.js></script>" },
       { html: "<a href=//example.invalid/unquoted-link>外部链接</a>" },
       { html: "<script src=https:&#47;&#47;example.invalid/unquoted-entity.js></script>" },
+      { html: '<img src="https:&NewLine;//example.invalid/entity-newline.png">' },
+      { html: "<img src=https:&#10;//example.invalid/numeric-newline.png>" },
+      { html: '<img src="https://example.invalid/first.png" src="./ignored-safe.png">' },
       { html: '<script>fetch("https://example.invalid/inline-script");</script>' },
       { js: "fetch(`https:\\u002f\\u002fexample.invalid/template-fetch`);" },
       { js: "import(`https:\\x2f\\u{2f}example.invalid/template-import.js`);" },
+      { js: "const xhr = new XMLHttpRequest(); xhr.open(`GET`, `https://example.invalid/template-xhr`);" },
       { js: "fetch(`https://${host}/dynamic-fetch`);" },
       { js: "import(`./${specifier}`);" },
+      { js: 'const u = "./local.json"; fetch(u);' },
+      { js: "const u = `./${specifier}`; import(u);" },
+      { js: "const u = makeUrl(); new WebSocket(u);" },
+      { js: "const u = `/events/${channel}`; new EventSource(u);" },
+      { html: '<script type="module">const u = `./${name}`; fetch(u)</script>' },
     ];
 
     for (const [index, overrides] of maliciousBuilds.entries()) {
@@ -100,8 +109,8 @@ describe("离线包脚本", () => {
 
   it("允许 blob、data、相对资源和中文文本", () => {
     const directory = makeOfflineBuild({
-      html: '<!-- <img src=https://example.invalid/comment-only> --><p>离线中文说明</p><script type=application/json>{"help":"<img src=https://example.invalid/text-only>"}</script><img src=blob:local-image><img src=data:image/png;base64,AAAA><script src=../assets/index-a.js></script>',
-      js: 'fetch("blob:local-data"); fetch("data:text/plain,本地"); import("./relative-module.js");',
+      html: '<!-- <img src=https://example.invalid/comment-only> --><pre>&#60;img src=https://example.invalid/text-only&#62;</pre><p>离线中文说明</p><script type=application/json>{"help":"<img src=https://example.invalid/text-only>"}</script><img src=blob:local-image><img src=data:image/png;base64,AAAA><img src="./first-safe.png" src="https://example.invalid/ignored-duplicate.png"><img srcset="data:text/plain,https://example.invalid/not-a-request 1x, ./local.png 2x"><script src=../assets/index-a.js></script>',
+      js: 'fetch("blob:local-data"); fetch("data:text/plain,本地"); import("./runtime-3_8-Ab12cd34.js"); const xhr = new XMLHttpRequest(); xhr.open(`GET`, `../assets/local.json`);',
       css: 'body { background-image: url(data:image/png;base64,AAAA); }',
     });
     const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-allowed-"));
