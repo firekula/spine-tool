@@ -6,7 +6,7 @@ export interface ZipPathAllocator {
   allocate(regionName: string): string;
 }
 
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
 const DRIVE_SEGMENT = /^[a-zA-Z]:$/;
 
 function safeSegment(segment: string): string | null {
@@ -42,12 +42,19 @@ function suffixed(path: string, occurrence: number): string {
 
 export function createZipPathAllocator(): ZipPathAllocator {
   const occurrences = new Map<string, number>();
+  const allocated = new Set<string>();
   return {
     allocate(regionName: string): string {
       const normalised = normalisePath(regionName);
-      const occurrence = (occurrences.get(normalised) ?? 0) + 1;
+      let occurrence = (occurrences.get(normalised) ?? 0) + 1;
+      let path = suffixed(normalised, occurrence);
+      while (allocated.has(path)) {
+        occurrence += 1;
+        path = suffixed(normalised, occurrence);
+      }
       occurrences.set(normalised, occurrence);
-      return suffixed(normalised, occurrence);
+      allocated.add(path);
+      return path;
     },
   };
 }

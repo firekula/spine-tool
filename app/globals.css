@@ -54,7 +54,9 @@ h1, h2 { margin: 0; } h1 { font-size: 1.1rem; } h2 { font-size: .95rem; }
 .export-number-field input, .export-region-row input { min-width: 0; padding: .35rem .45rem; }
 .export-region-list { max-height: min(38vh, 360px); overflow: auto; }
 .export-region-row { display: grid; grid-template-columns: minmax(0, 1fr) 5.4rem; align-items: center; gap: .45rem; color: #c6d1e7; font-size: .8rem; }
-.export-region-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-region-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-override-input { display: grid; gap: .2rem; }
+.export-field-error { color: #ffb4b4; font-size: .72rem; line-height: 1.35; white-space: normal; }
 .preview-panel { display: grid; place-items: center; min-width: 0; min-height: 480px; padding: 1.25rem; overflow: hidden; background: #101722; }
 .preview-empty { max-width: 430px; text-align: center; padding: 2rem; border: 1px dashed #53637d; border-radius: .75rem; background: #131b29e8; }
 .preview-empty p { color: #a7b8d6; line-height: 1.6; }

@@ -75,4 +75,31 @@ describe("exportAllRegions", () => {
     expect(report.regions[1]).toMatchObject({ finalMultiplier: 3, userOverrideMultiplier: 3 });
     expect(progress.mock.calls).toEqual([[1, 4], [2, 4], [3, 4], [4, 4]]);
   });
+
+  it("在自动后缀与真实 Region 名称碰撞时保持 PNG 与报告路径唯一", async () => {
+    mocks.restoreRegion.mockReset();
+    mocks.restoreRegion.mockResolvedValue({
+      blob: new Blob(["png"], { type: "image/png" }), width: 20, height: 24, plan: {},
+    });
+    const collisionAtlas: AtlasDocument = {
+      pages: atlas.pages,
+      regions: ["head", "head", "head-2"].map((name, index) => ({
+        ...atlas.regions[0]!, name, index,
+      })),
+    };
+
+    const blob = await exportAllRegions({
+      atlas: collisionAtlas,
+      textures: new Map([["page.png", {} as ImageBitmap]]),
+      inferredScale,
+      globalMultiplier: 1,
+      regionOverrides: new Map(),
+    }, vi.fn());
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const report = JSON.parse(await zip.file("export-report.json")!.async("text"));
+    const pngPaths = Object.keys(zip.files).filter((path) => path.endsWith(".png")).sort();
+
+    expect(pngPaths).toEqual(["head-2-2.png", "head-2.png", "head.png"]);
+    expect(new Set(report.regions.map((entry: { zipPath: string }) => entry.zipPath)).size).toBe(3);
+  });
 });

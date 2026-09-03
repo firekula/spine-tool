@@ -14,6 +14,14 @@ function displayMultiplier(value: number): string {
   return Number.isFinite(value) ? String(Number(value.toPrecision(6))) : "";
 }
 
+function multiplierError(value: string, allowBlank: boolean): string | null {
+  if (!value.trim() && allowBlank) return null;
+  const multiplier = Number(value);
+  return Number.isFinite(multiplier) && multiplier > 0
+    ? null
+    : "倍率必须是大于 0 的有限数值。";
+}
+
 function downloadZip(blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -30,8 +38,17 @@ export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps
   const [notice, setNotice] = useState<string | null>(null);
   const exporting = progress !== null;
   const globalMultiplier = Number(globalValue);
-  const canExport = Boolean(atlas && textures && Number.isFinite(globalMultiplier) && globalMultiplier > 0 && !exporting);
-  const percent = Math.round(inferredScale.exportPercent * globalMultiplier * 100) / 100;
+  const globalError = multiplierError(globalValue, false);
+  const overrideErrors = useMemo(() => {
+    const errors = new Map<string, string>();
+    for (const [key, value] of overrideValues) {
+      const error = multiplierError(value, true);
+      if (error) errors.set(key, error);
+    }
+    return errors;
+  }, [overrideValues]);
+  const finalMultiplier = globalError ? null : inferredScale.restoreMultiplier * globalMultiplier;
+  const canExport = Boolean(atlas && textures && !globalError && overrideErrors.size === 0 && !exporting);
   const overrides = useMemo(() => {
     const values = new Map<string, number>();
     for (const [key, value] of overrideValues) {
@@ -81,7 +98,10 @@ export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps
         <h3>自动倍率</h3>
         <dl>
           <div><dt>恢复倍率</dt><dd>{displayMultiplier(inferredScale.restoreMultiplier)} 倍</dd></div>
-          <div><dt>导出比例</dt><dd>{percent}%</dd></div>
+          <div><dt>推算导出比例</dt><dd>{displayMultiplier(inferredScale.exportPercent)}%</dd></div>
+          <div><dt>最终恢复倍率</dt><dd>{finalMultiplier === null
+            ? "请先修正全局倍率"
+            : `${displayMultiplier(inferredScale.restoreMultiplier)} × ${displayMultiplier(globalMultiplier)} = ${displayMultiplier(finalMultiplier)} 倍`}</dd></div>
           <div><dt>有效样本</dt><dd>{inferredScale.sampleCount}</dd></div>
           <div><dt>置信度</dt><dd>{inferredScale.confidence === "high" ? "高" : inferredScale.confidence === "medium" ? "中" : "低"}</dd></div>
         </dl>
@@ -96,26 +116,41 @@ export function ExportPanel({ atlas, textures, inferredScale }: ExportPanelProps
 
       <label className="export-number-field">
         <span>全局倍率（乘在自动倍率之后）</span>
-        <input type="number" min="0.01" step="0.01" value={globalValue} onChange={(event) => setGlobalValue(event.target.value)} disabled={exporting} />
+        <input
+          type="text"
+          inputMode="decimal"
+          value={globalValue}
+          aria-invalid={Boolean(globalError)}
+          aria-describedby={globalError ? "global-multiplier-error" : undefined}
+          onChange={(event) => setGlobalValue(event.target.value)}
+          disabled={exporting}
+        />
+        {globalError && <span className="export-field-error" id="global-multiplier-error">全局倍率必须是大于 0 的有限数值。</span>}
       </label>
 
       <section className="export-region-list" aria-label="Region 单项倍率覆盖">
         <h3>Region（{atlas.regions.length}）</h3>
         {atlas.regions.map((region) => {
           const key = `${region.name}#${region.index}`;
+          const error = overrideErrors.get(key);
+          const errorId = `region-multiplier-${region.index}-error`;
           return (
             <label className="export-region-row" key={key}>
               <span title={region.name}>{region.name}</span>
-              <input
-                aria-label={`${region.name} 的单项倍率`}
-                type="number"
-                min="0.01"
-                step="0.01"
-                placeholder="继承"
-                value={overrideValues.get(key) ?? ""}
-                onChange={(event) => updateOverride(key, event.target.value)}
-                disabled={exporting}
-              />
+              <span className="export-override-input">
+                <input
+                  aria-label={`${region.name} 的单项倍率`}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="继承"
+                  value={overrideValues.get(key) ?? ""}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? errorId : undefined}
+                  onChange={(event) => updateOverride(key, event.target.value)}
+                  disabled={exporting}
+                />
+                {error && <span className="export-field-error" id={errorId}>单项倍率必须是大于 0 的有限数值。</span>}
+              </span>
             </label>
           );
         })}

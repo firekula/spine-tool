@@ -16,4 +16,18 @@ describe("createZipPathAllocator", () => {
     expect(allocator.allocate("D:body/head")).toBe("body/head-2.png");
     expect(allocator.allocate("../../")).toBe("region.png");
   });
+
+  it("全局避开自动后缀和真实名称的碰撞", () => {
+    const allocator = createZipPathAllocator();
+
+    expect(allocator.allocate("head")).toBe("head.png");
+    expect(allocator.allocate("head")).toBe("head-2.png");
+    expect(allocator.allocate("head-2")).toBe("head-2-2.png");
+  });
+
+  it("清除 C1 控制字符", () => {
+    const allocator = createZipPathAllocator();
+
+    expect(allocator.allocate("body/\u0080head\u009f")).toBe("body/head.png");
+  });
 });
