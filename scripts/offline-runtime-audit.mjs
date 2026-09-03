@@ -9,25 +9,25 @@ const maxCanonicalizationPasses = 8;
 // These are complete SHA-256 digests of reviewed Vite output, not filename hashes.
 // A source, dependency, minifier, or shared-chunk change invalidates the exception.
 const trustedDynamicJavaScript = new Map([
-  ["assets/index-D-1-wl_e.js", {
+  ["assets/index-Dr0iepuV.js", {
     kind: "vite-modulepreload",
-    sha256: "719f411e1d5ec59d86d95928bbee69b99811fb1500e1041ac3d34ed7ff394b8d",
+    sha256: "65ce91f4d549863a711fc073e0c6a53f3990d92b2a2a1881d443081276b33340",
   }],
-  ["assets/runtime-3_8-DP0ZnDjL.js", {
+  ["assets/runtime-3_8-C5yBT3zC.js", {
     kind: "spine-runtime",
-    sha256: "6a7332f08877ed79536fa11da136aa7e234d75d879de7075e39495a0a4a05aa9",
+    sha256: "72c0a6022eb3df8edd429a848dab4677b7951d2d01ba351436a2cedbf965b434",
   }],
-  ["assets/runtime-4_0-D6vn5Ofx.js", {
+  ["assets/runtime-4_0-CCQyGAmG.js", {
     kind: "spine-runtime",
-    sha256: "a0f27a0e6e303f2a15ac2f05c3885d908e11d60849565aca8658a6a82b7d06ad",
+    sha256: "82eba48a3182eb38a38bcc5ec7de90287907c92a1e7161e69725c20b5d0e5013",
   }],
-  ["assets/runtime-4_1-C6HBTeNT.js", {
+  ["assets/runtime-4_1-sRfPX9k5.js", {
     kind: "spine-runtime",
-    sha256: "b85012ef8b46f291aab9310d2a3ccc760f524cb70833f32cd8a8b94731f9b560",
+    sha256: "b69c15407bd1084d7e1fa496ee08aae591ec03c0848dd04fb1f4fe2c1c2f5576",
   }],
-  ["assets/runtime-4_2-BXwJOlpe.js", {
+  ["assets/runtime-4_2-CCHF-W9k.js", {
     kind: "spine-runtime",
-    sha256: "1e1034ec43aeed4f6ccf77f12dfe5fdb8e91ea5282e8ec4cd922b00285ed66cb",
+    sha256: "00062ee0219213f750a83e65b5936c837a31ad469dfcb682ca539d805bf79e2a",
   }],
 ]);
 

@@ -23,6 +23,14 @@ function truncate(value: string, maximum: number): string {
   return result;
 }
 
+function truncatePortableSegment(value: string, maximum: number): string {
+  let shortened = truncate(value, maximum).replace(WINDOWS_TRAILING_DOTS_OR_SPACES, "");
+  if (WINDOWS_DEVICE_NAME.test(shortened)) {
+    shortened = `_${truncate(shortened, Math.max(0, maximum - 1))}`;
+  }
+  return shortened;
+}
+
 function safeSegment(segment: string): string | null {
   let cleaned = segment.replace(CONTROL_CHARACTERS, "").trim();
   if (!cleaned || cleaned === "." || cleaned === ".." || DRIVE_SEGMENT.test(cleaned)) return null;
@@ -52,7 +60,7 @@ function withinPortablePathLength(parts: string[]): string[] {
   for (const directory of parts.slice(0, -1)) {
     const available = MAX_ZIP_PATH_LENGTH - used - 1;
     if (available <= 0) break;
-    const shortened = truncate(directory, available).replace(WINDOWS_TRAILING_DOTS_OR_SPACES, "");
+    const shortened = truncatePortableSegment(directory, available);
     if (!shortened) break;
     directories.push(shortened);
     used += shortened.length + 1;

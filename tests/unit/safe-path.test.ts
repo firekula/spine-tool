@@ -63,4 +63,14 @@ describe("createZipPathAllocator", () => {
     expect(first.split("/").every((segment) => segment.length <= 100)).toBe(true);
     expect(second).toMatch(/-2\.png$/);
   });
+
+  it("完整路径截断后仍避开 Windows 设备保留名", () => {
+    const allocator = createZipPathAllocator();
+    const path = allocator.allocate(
+      `${"a".repeat(100)}/${"b".repeat(34)}/CONSOLE/${"f".repeat(96)}`,
+    );
+
+    expect(path.length).toBeLessThanOrEqual(240);
+    expect(path.split("/")).not.toContain("CON");
+  });
 });
