@@ -14,6 +14,9 @@ export function WorkspaceShell() {
         <div>
           <p className="eyebrow">Spine 本地工具</p>
           <h1>动画预览与 Atlas 子图导出</h1>
+          <p className="runtime-license">
+            Spine Runtime 使用受 Esoteric Software 许可条款约束。
+          </p>
         </div>
         <div className="toolbar-actions">
           <button type="button" className="button button-primary">

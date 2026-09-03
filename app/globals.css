@@ -21,6 +21,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .topbar, .playback-bar { background: #181f2d; border-color: #2d374a; }
 .topbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem; border-bottom: 1px solid #2d374a; }
 .eyebrow { margin: 0; color: #9bb2dc; font-size: .8rem; }
+.runtime-license { margin: .35rem 0 0; color: #c6d1e7; font-size: .75rem; }
 h1, h2 { margin: 0; } h1 { font-size: 1.1rem; } h2 { font-size: .95rem; }
 .toolbar-actions, .panel-heading, .playback-bar { display: flex; align-items: center; gap: .65rem; }
 .button, .icon-button, .tabs button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border: 1px solid #3c4a63; border-radius: .45rem; background: #222c3d; color: inherit; padding: .5rem .7rem; }
