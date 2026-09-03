@@ -76,6 +76,14 @@ describe("离线包脚本", () => {
       { html: '<script src="https://example.invalid/app.js"></script>' },
       { html: '<script src="https:&#47;&#47;example.invalid/escaped-app.js"></script>' },
       { html: '<script src="https:&sol;&sol;example.invalid/named-entity-app.js"></script>' },
+      { html: "<script src=https://example.invalid/unquoted-app.js></script>" },
+      { html: "<a href=//example.invalid/unquoted-link>外部链接</a>" },
+      { html: "<script src=https:&#47;&#47;example.invalid/unquoted-entity.js></script>" },
+      { html: '<script>fetch("https://example.invalid/inline-script");</script>' },
+      { js: "fetch(`https:\\u002f\\u002fexample.invalid/template-fetch`);" },
+      { js: "import(`https:\\x2f\\u{2f}example.invalid/template-import.js`);" },
+      { js: "fetch(`https://${host}/dynamic-fetch`);" },
+      { js: "import(`./${specifier}`);" },
     ];
 
     for (const [index, overrides] of maliciousBuilds.entries()) {
@@ -88,5 +96,17 @@ describe("离线包脚本", () => {
       }
       throw new Error(`恶意 fixture ${index} 未被拒绝`);
     }
+  });
+
+  it("允许 blob、data、相对资源和中文文本", () => {
+    const directory = makeOfflineBuild({
+      html: '<!-- <img src=https://example.invalid/comment-only> --><p>离线中文说明</p><script type=application/json>{"help":"<img src=https://example.invalid/text-only>"}</script><img src=blob:local-image><img src=data:image/png;base64,AAAA><script src=../assets/index-a.js></script>',
+      js: 'fetch("blob:local-data"); fetch("data:text/plain,本地"); import("./relative-module.js");',
+      css: 'body { background-image: url(data:image/png;base64,AAAA); }',
+    });
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-allowed-"));
+    temporaryDirectories.push(archiveDirectory);
+
+    expect(() => packageFixture(directory, join(archiveDirectory, "offline.zip"))).not.toThrow();
   });
 });

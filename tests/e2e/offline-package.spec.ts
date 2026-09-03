@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import JSZip from "jszip";
+import { externalRuntimeDependencies } from "../../scripts/offline-runtime-audit.mjs";
 import { atlasFor, collectPageErrors, importFixture, skeletonJson } from "./fixtures";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -39,12 +40,8 @@ test.beforeAll(async () => {
     .filter((name) => /\.(?:html|js|css)$/.test(name))
     .map(async (name) => ({ name, text: await offlineZip.file(name)!.async("string") })));
   const remoteDependencies = runtimeText
-    .flatMap(({ name, text }) => {
-      const matches = text.match(/(?:import\s*\(\s*|importScripts\s*\(\s*|(?:fetch|(?:window|self|globalThis)\s*\.\s*fetch)\s*\(\s*|new\s+(?:Worker|SharedWorker|WebSocket|EventSource)\s*\(\s*|\.\s*open\s*\(\s*["'][^"']*["']\s*,\s*|(?:src|href|srcset|action)\s*=\s*["']|@import\s+(?:url\()?\s*["']|url\(\s*["']?)(?:(?:https?:)?\/\/|wss:\/\/)[^"'\s)]+/g);
-      return matches?.map((match) => `${name}: ${match}`) ?? [];
-    });
+    .flatMap(({ name, text }) => externalRuntimeDependencies(name, text));
   expect(remoteDependencies).toEqual([]);
-  expect(runtimeText.flatMap(({ name, text }) => (text.match(/\\u002f\\u002f/gi) ?? []).map((match) => `${name}: ${match}`))).toEqual([]);
 
   server = createServer(async (request, response) => {
     const requested = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
