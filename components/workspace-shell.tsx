@@ -122,7 +122,12 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     if (!activeBridge || !state.selectedAnimation) return;
     activeBridge.play(state.selectedAnimation, state.loop);
     activeBridge.setHiddenSlots(state.hiddenSlots);
-  }, [activeBridge, state.loop, state.selectedAnimation]);
+  }, [activeBridge, state.selectedAnimation]);
+
+  useEffect(() => {
+    if (!activeBridge) return;
+    activeBridge.setLoop(state.loop);
+  }, [activeBridge, state.loop]);
 
   useEffect(() => {
     if (!activeBridge) return;

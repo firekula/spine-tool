@@ -4,21 +4,17 @@ import {
   useEffect,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import type {
   PlaybackSnapshot,
   RuntimeLoadInput,
+  RuntimeView,
   SkeletonMetadata,
   SpineRuntimeBridge,
 } from "@/lib/spine/bridge-types";
-
-interface ViewTransform {
-  x: number;
-  y: number;
-  scale: number;
-}
 
 export interface PreviewCanvasProps {
   bridge: SpineRuntimeBridge;
@@ -29,22 +25,13 @@ export interface PreviewCanvasProps {
   onSnapshot: (snapshot: PlaybackSnapshot) => void;
 }
 
-const DEFAULT_VIEW: ViewTransform = { x: 0, y: 0, scale: 1 };
-
-function metadataBounds(metadata: SkeletonMetadata | null): { width: number; height: number } {
-  if (!metadata || metadata.regionAttachments.length === 0) return { width: 1, height: 1 };
-  return metadata.regionAttachments.reduce(
-    (bounds, attachment) => ({
-      width: Math.max(bounds.width, attachment.width),
-      height: Math.max(bounds.height, attachment.height),
-    }),
-    { width: 1, height: 1 },
-  );
-}
+const DEFAULT_VIEW: RuntimeView = { centerX: 0, centerY: 0, zoom: 1 };
+const ZOOM_FACTOR = 1.2;
+const KEYBOARD_PAN_PIXELS = 40;
 
 export function PreviewCanvas({
   bridge,
-  metadata,
+  metadata: _metadata,
   loadInput,
   onLoaded,
   onLoadError,
@@ -62,7 +49,7 @@ export function PreviewCanvas({
     bridge: SpineRuntimeBridge;
     cancelled: boolean;
   } | null>(null);
-  const [view, setView] = useState<ViewTransform>(DEFAULT_VIEW);
+  const [view, setView] = useState<RuntimeView>(DEFAULT_VIEW);
   const [background, setBackground] = useState<"grid" | "light" | "dark">("grid");
 
   useEffect(() => {
@@ -134,25 +121,31 @@ export function PreviewCanvas({
     return () => observer.disconnect();
   }, [bridge]);
 
+  useEffect(() => {
+    bridge.setView(view);
+  }, [bridge, view]);
+
   const fitView = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const bounds = metadataBounds(metadata);
-    const scale = Math.min(
+    const bounds = bridge.getBounds();
+    if (!bounds) return;
+    const zoom = Math.min(
       viewport.clientWidth / bounds.width,
       viewport.clientHeight / bounds.height,
     ) * 0.85;
-    const safeScale = Math.min(8, Math.max(0.1, scale));
+    const safeZoom = Math.min(20, Math.max(0.05, zoom));
     setView({
-      x: (viewport.clientWidth - bounds.width * safeScale) / 2,
-      y: (viewport.clientHeight - bounds.height * safeScale) / 2,
-      scale: safeScale,
+      centerX: bounds.x + bounds.width / 2,
+      centerY: bounds.y + bounds.height / 2,
+      zoom: safeZoom,
     });
-  }, [metadata]);
+  }, [bridge]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.currentTarget.focus();
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -161,7 +154,11 @@ export function PreviewCanvas({
     const deltaX = event.clientX - drag.x;
     const deltaY = event.clientY - drag.y;
     dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    setView((current) => ({ ...current, x: current.x + deltaX, y: current.y + deltaY }));
+    setView((current) => ({
+      ...current,
+      centerX: current.centerX - deltaX / current.zoom,
+      centerY: current.centerY + deltaY / current.zoom,
+    }));
   };
 
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
@@ -169,16 +166,60 @@ export function PreviewCanvas({
     const bounds = event.currentTarget.getBoundingClientRect();
     const pointerX = event.clientX - bounds.left;
     const pointerY = event.clientY - bounds.top;
+    const viewportWidth = event.currentTarget.clientWidth;
+    const viewportHeight = event.currentTarget.clientHeight;
     setView((current) => {
-      const factor = Math.exp(-event.deltaY * 0.0015);
-      const scale = Math.min(8, Math.max(0.1, current.scale * factor));
-      const ratio = scale / current.scale;
+      if (event.deltaY === 0) return current;
+      const factor = event.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+      const zoom = Math.min(20, Math.max(0.05, current.zoom * factor));
+      const screenX = pointerX - viewportWidth / 2;
+      const screenY = pointerY - viewportHeight / 2;
+      const worldX = current.centerX + screenX / current.zoom;
+      const worldY = current.centerY - screenY / current.zoom;
       return {
-        scale,
-        x: pointerX - (pointerX - current.x) * ratio,
-        y: pointerY - (pointerY - current.y) * ratio,
+        zoom,
+        centerX: worldX - screenX / zoom,
+        centerY: worldY + screenY / zoom,
       };
     });
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const key = event.key;
+    if (key === "Home") {
+      event.preventDefault();
+      fitView();
+      return;
+    }
+    if (key === "0") {
+      event.preventDefault();
+      setView(DEFAULT_VIEW);
+      return;
+    }
+    if (["+", "=", "-", "_"].includes(key)) {
+      event.preventDefault();
+      setView((current) => ({
+        ...current,
+        zoom: Math.min(
+          20,
+          Math.max(0.05, current.zoom * (["+", "="].includes(key) ? ZOOM_FACTOR : 1 / ZOOM_FACTOR)),
+        ),
+      }));
+      return;
+    }
+    const direction = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, 1],
+      ArrowDown: [0, -1],
+    }[key];
+    if (!direction) return;
+    event.preventDefault();
+    setView((current) => ({
+      ...current,
+      centerX: current.centerX + direction[0]! * KEYBOARD_PAN_PIXELS / current.zoom,
+      centerY: current.centerY + direction[1]! * KEYBOARD_PAN_PIXELS / current.zoom,
+    }));
   };
 
   return (
@@ -211,17 +252,18 @@ export function PreviewCanvas({
       <div
         ref={viewportRef}
         className="preview-viewport"
+        role="region"
+        aria-label="Spine 预览交互区域"
+        aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - Home 0"
+        tabIndex={0}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={() => { dragRef.current = null; }}
         onPointerCancel={() => { dragRef.current = null; }}
         onWheel={handleWheel}
+        onKeyDown={handleKeyDown}
       >
-        <canvas
-          ref={canvasRef}
-          aria-label="Spine 动画画布"
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
-        />
+        <canvas ref={canvasRef} aria-label="Spine 动画画布" />
       </div>
     </div>
   );

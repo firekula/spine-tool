@@ -31,3 +31,32 @@
 
 - 增加 `@testing-library/react`、`@testing-library/user-event` 与 `jsdom` 作为交互测试 devDependencies。
 - Vitest 仅为 `*.test.tsx` 使用 jsdom；既有 `*.test.ts` 继续使用 Node 环境。
+
+## Fix Round 1
+
+### 修复内容
+
+- 扩展 `SpineRuntimeBridge`：
+  - `getBounds()` 从当前 Runtime Skeleton 的 `getBounds(offset, size)` 返回带位置的整体世界坐标边界；无效或空边界返回 `null`。
+  - `setView({ centerX, centerY, zoom })` 更新 Runtime OrthoCamera 的位置和 zoom 并调用 `camera.update()`；UI zoom 定义为视觉放大倍率，Runtime camera 使用其倒数。
+  - `setLoop(loop)` 原位修改当前 TrackEntry 的 `loop`，不调用 `setAnimation`，因此不改变 track time 或 paused 状态。
+- `PreviewCanvas` 移除 Canvas CSS transform。拖动、指针中心缩放、整体 bounds 适配、重置均改为精确 view 数值并通过 Bridge 驱动 Runtime 投影；DPR backing store resize 流程保持不变。
+- `getBounds()` 使用带 `set(x, y)` 的轻量 mutable vector，匹配 Spine 3.8–4.2 的真实 `Vector2` 调用契约，避免普通对象在真实 Runtime 中失败。
+- 预览交互区域增加 `role="region"`、可访问名称、`tabIndex=0` 和 `aria-keyshortcuts`；方向键平移、`+`/`-` 缩放、`Home` 适配、`0` 重置与鼠标行为共用同一 view 状态。
+- `WorkspaceShell` 将动画选择和 loop 同步拆开：只有动画名称变化才调用 `play()`，loop 变化只调用 `setLoop()`。
+
+### RED / GREEN
+
+- 修改 `tests/unit/workspace-controls.test.tsx`：把旧的静态 transform 字符串断言拆为精确的 pointer pan、指针中心 wheel zoom、真实 bounds fit 和键盘等价调用断言；增加“暂停并 seek 后切 loop 不调用 play”覆盖。删除任一对应事件处理器都会使调用参数或调用次数断言失败。
+- 修改 `tests/unit/runtime-loader.test.ts`：增加真实 Skeleton bounds、TrackEntry 原位 loop、camera center/zoom 和 DPR backing store 联合覆盖。
+- RED：`npm test -- tests/unit/workspace-controls.test.tsx tests/unit/runtime-loader.test.ts` 得到 6 个预期失败，分别为旧 loop 重播、缺失 `getBounds/setView`、pointer/wheel 未同步和预览区域不可聚焦。
+- GREEN：同一 covering 命令 32/32 通过。
+- 真实 Runtime 源码契约复核后进一步收紧 bounds harness；聚焦 RED 为 `offset.set is not a function`，改用兼容 mutable vector 后该回归用例转绿。
+
+### 最终验证
+
+- `npm test`：8 个测试文件、66 个测试全部通过。
+- `npm run build`：通过，四个 Runtime 动态 chunk 保持分离。
+- `npm run build:offline`：通过，离线产物生成成功。
+- `npm run verify-runtime-assets`：通过，输出 `Verified 4 isolated Spine runtimes`，三份 npm tarball SHA-256 与 3.8 vendor 资产验证均通过。
+- `git diff --check`：通过。

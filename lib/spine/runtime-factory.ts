@@ -3,6 +3,8 @@ import type {
   PlaybackSnapshot,
   RegionAttachmentMetadata,
   RuntimeLoadInput,
+  RuntimeView,
+  SkeletonBounds,
   SkeletonMetadata,
   SpineRuntimeBridge,
 } from "./bridge-types";
@@ -42,11 +44,34 @@ interface RuntimeSlot {
   setAttachment(attachment: unknown | null): void;
 }
 
+interface RuntimeVector2 {
+  x: number;
+  y: number;
+  set(x: number, y: number): RuntimeVector2;
+}
+
+function createRuntimeVector2(): RuntimeVector2 {
+  return {
+    x: 0,
+    y: 0,
+    set(x, y) {
+      this.x = x;
+      this.y = y;
+      return this;
+    },
+  };
+}
+
 interface RuntimeSkeleton {
   data: RuntimeSkeletonData;
   slots: RuntimeSlot[];
   setSkin(skin: RuntimeSkin | null): void;
   setSlotsToSetupPose(): void;
+  getBounds(
+    offset: RuntimeVector2,
+    size: RuntimeVector2,
+    temp?: number[],
+  ): void;
 }
 
 interface RuntimeTrackEntry {
@@ -65,6 +90,8 @@ interface RuntimeAnimationState {
 
 interface RuntimeRenderer {
   camera?: {
+    position?: { x: number; y: number; z?: number };
+    zoom?: number;
     viewportWidth?: number;
     viewportHeight?: number;
     setViewport?(width: number, height: number): void;
@@ -338,6 +365,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
   private hiddenSlots = new Set<string>();
   private paused = false;
   private speed = 1;
+  private view: RuntimeView = { centerX: 0, centerY: 0, zoom: 1 };
   private disposed = false;
   private loadGeneration = 0;
   private pendingLoads = new Map<number, { cancel(): void }>();
@@ -422,6 +450,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
       this.skeleton = skeleton;
       this.state = state;
       this.premultipliedAlpha = createdAtlas.premultipliedAlpha;
+      this.applyView();
       createdAtlas = null;
       renderer = null;
       state = null;
@@ -445,6 +474,10 @@ class RuntimeBridge implements SpineRuntimeBridge {
     if (!this.state) return;
     this.entry = this.state.setAnimation(0, name, loop);
     this.paused = false;
+  }
+
+  setLoop(loop: boolean): void {
+    if (this.entry) this.entry.loop = loop;
   }
 
   pause(paused: boolean): void {
@@ -478,6 +511,34 @@ class RuntimeBridge implements SpineRuntimeBridge {
 
   setHiddenSlots(names: ReadonlySet<string>): void {
     this.hiddenSlots = new Set(names);
+  }
+
+  getBounds(): SkeletonBounds | null {
+    if (!this.skeleton) return null;
+    this.adapter.updateWorldTransform(this.skeleton);
+    const offset = createRuntimeVector2();
+    const size = createRuntimeVector2();
+    this.skeleton.getBounds(offset, size);
+    if (
+      !Number.isFinite(offset.x)
+      || !Number.isFinite(offset.y)
+      || !Number.isFinite(size.x)
+      || !Number.isFinite(size.y)
+      || size.x <= 0
+      || size.y <= 0
+    ) {
+      return null;
+    }
+    return { x: offset.x, y: offset.y, width: size.x, height: size.y };
+  }
+
+  setView(view: RuntimeView): void {
+    this.view = {
+      centerX: Number.isFinite(view.centerX) ? view.centerX : 0,
+      centerY: Number.isFinite(view.centerY) ? view.centerY : 0,
+      zoom: Number.isFinite(view.zoom) ? Math.min(100, Math.max(0.01, view.zoom)) : 1,
+    };
+    this.applyView();
   }
 
   resize(width: number, height: number, dpr: number): void {
@@ -572,6 +633,17 @@ class RuntimeBridge implements SpineRuntimeBridge {
       playing: Boolean(this.entry) && !this.paused,
       time,
     };
+  }
+
+  private applyView(): void {
+    const camera = this.renderer?.camera;
+    if (!camera) return;
+    if (camera.position) {
+      camera.position.x = this.view.centerX;
+      camera.position.y = this.view.centerY;
+    }
+    camera.zoom = 1 / this.view.zoom;
+    camera.update();
   }
 }
 

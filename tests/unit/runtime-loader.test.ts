@@ -102,6 +102,7 @@ interface HarnessOptions {
   atlasMode?: "constructor-loader" | "page-setter";
   onTextureCreated?: () => void;
   pages?: Array<{ name: string }>;
+  bounds?: { x: number; y: number; width: number; height: number };
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -112,7 +113,14 @@ function createHarness(options: HarnessOptions = {}) {
   const skeletonDeltas: number[] = [];
   const textureMipMaps: boolean[] = [];
   const visibleAttachment = { width: 64, height: 32 };
+  const camera = {
+    position: { x: 0, y: 0, z: 0 },
+    zoom: 1,
+    viewportWidth: 0,
+    viewportHeight: 0,
+  };
   let loadedSkeleton: Skeleton | null = null;
+  let currentEntry: { animation: { name: string; duration: number }; trackTime: number; loop: boolean } | null = null;
 
   class TextureAtlas {
     pages = (options.pages ?? []).map(({ name }) => ({
@@ -208,6 +216,15 @@ function createHarness(options: HarnessOptions = {}) {
 
     setSlotsToSetupPose() {}
 
+    getBounds(
+      offset: { x: number; y: number; set(x: number, y: number): void },
+      size: { x: number; y: number; set(x: number, y: number): void },
+    ) {
+      const bounds = options.bounds ?? { x: -25, y: -10, width: 150, height: 90 };
+      offset.set(bounds.x, bounds.y);
+      size.set(bounds.width, bounds.height);
+    }
+
   }
 
   class AnimationStateData {
@@ -230,6 +247,7 @@ function createHarness(options: HarnessOptions = {}) {
 
     setAnimation(_trackIndex: number, name: string, loop: boolean) {
       this.entry = { animation: { name, duration: 2 }, trackTime: 0, loop };
+      currentEntry = this.entry;
       return this.entry;
     }
 
@@ -252,7 +270,14 @@ function createHarness(options: HarnessOptions = {}) {
 
   class SceneRenderer {
     readonly camera = {
-      setViewport: (width: number, height: number) => events.push(`camera.viewport:${width}x${height}`),
+      position: camera.position,
+      get zoom() { return camera.zoom; },
+      set zoom(value: number) { camera.zoom = value; },
+      setViewport: (width: number, height: number) => {
+        camera.viewportWidth = width;
+        camera.viewportHeight = height;
+        events.push(`camera.viewport:${width}x${height}`);
+      },
       update: () => events.push("camera.update"),
     };
 
@@ -321,6 +346,8 @@ function createHarness(options: HarnessOptions = {}) {
 
   return {
     canvas,
+    camera,
+    currentEntry: () => currentEntry,
     disposed,
     drawPremultipliedAlpha,
     drawnAttachments,
@@ -583,6 +610,29 @@ describe("createRuntimeBridge", () => {
       "skin.add:alternate",
       "skeleton.skin:bridge-composite",
     ]);
+  });
+
+  it("返回当前整体 bounds，原位切换 loop，并用 Runtime 相机设置 view", async () => {
+    const harness = createHarness({ bounds: { x: -40, y: 25, width: 180, height: 320 } });
+    const bridge = createRuntimeBridge("4.2", harness.runtime);
+    await bridge.load(harness.input);
+
+    expect(bridge.getBounds()).toEqual({ x: -40, y: 25, width: 180, height: 320 });
+
+    bridge.play("idle", true);
+    bridge.frame(0.5);
+    bridge.pause(true);
+    bridge.seek(1.25);
+    bridge.setLoop(false);
+    expect(harness.currentEntry()).toMatchObject({ trackTime: 1.25, loop: false });
+    expect(bridge.frame(0)).toMatchObject({ playing: false, time: 1.25 });
+
+    bridge.resize(320, 180, 2);
+    bridge.setView({ centerX: 37, centerY: -12, zoom: 2 });
+    expect(harness.camera.position).toMatchObject({ x: 37, y: -12 });
+    expect(harness.camera.zoom).toBe(0.5);
+    expect(harness.canvas.width).toBe(640);
+    expect(harness.canvas.height).toBe(360);
   });
 
   it("resize 使用 DPR 设置 backing store，dispose 幂等释放资源", async () => {

@@ -38,15 +38,32 @@ export interface PlaybackSnapshot {
   time: number;
 }
 
+export interface SkeletonBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Runtime camera view. `zoom` is visual magnification: 2 draws twice as large. */
+export interface RuntimeView {
+  centerX: number;
+  centerY: number;
+  zoom: number;
+}
+
 export interface SpineRuntimeBridge {
   readonly version: SupportedSpineVersion;
   load(input: RuntimeLoadInput): Promise<SkeletonMetadata>;
   play(name: string, loop: boolean): void;
+  setLoop(loop: boolean): void;
   pause(paused: boolean): void;
   seek(seconds: number): void;
   setSpeed(speed: number): void;
   setSkins(names: string[]): void;
   setHiddenSlots(names: ReadonlySet<string>): void;
+  getBounds(): SkeletonBounds | null;
+  setView(view: RuntimeView): void;
   resize(width: number, height: number, dpr: number): void;
   frame(deltaSeconds: number): PlaybackSnapshot;
   dispose(): void;
