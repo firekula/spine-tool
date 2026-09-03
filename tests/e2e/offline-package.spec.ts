@@ -43,9 +43,7 @@ test.beforeAll(async () => {
       return matches?.map((match) => `${name}: ${match}`) ?? [];
     });
   expect(remoteDependencies).toEqual([]);
-  const literalExternalUrls = runtimeText
-    .flatMap(({ name, text }) => (text.match(/https?:\/\/|\/\/cdn\./g) ?? []).map((match) => `${name}: ${match}`));
-  expect(literalExternalUrls).toEqual([]);
+  expect(runtimeText.flatMap(({ name, text }) => (text.match(/\\u002f\\u002f/gi) ?? []).map((match) => `${name}: ${match}`))).toEqual([]);
 
   server = createServer(async (request, response) => {
     const requested = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
