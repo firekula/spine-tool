@@ -69,3 +69,32 @@ test("超出范围版本只在需要时显示手动 Runtime，并可加载所选
   await expect(page.getByRole("group", { name: "Spine 版本信息" })).toContainText("Runtime 4.3（手动）");
   await expect(picker).toBeHidden();
 });
+
+test("自动 Runtime 失败后保留身份与 Atlas，并允许选择其他 Runtime 重试", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.goto("/");
+  await importFixture(page, {
+    atlas: atlasFor("page.png", ["body/head", "effect"]),
+    skeleton: skeletonJson("4.3.0"),
+  });
+
+  await expect(page.getByText("Atlas 已就绪，预览尚未可用")).toBeVisible();
+  const picker = page.getByRole("combobox", { name: "Runtime 版本" });
+  await expect(picker).toBeVisible();
+  const info = page.getByRole("group", { name: "Spine 版本信息" });
+  await expect(info).toContainText("素材版本 4.3.0");
+  await expect(info).toContainText("Runtime 4.3（自动）");
+  await expect(page.getByRole("heading", { name: "Region（2）" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /导出全部 ZIP/ })).toBeEnabled();
+  const center = page.getByRole("region", { name: "问题中心" });
+  await expect(center).toContainText("JSON 骨骼无效");
+
+  await picker.selectOption("4.2");
+  await page.getByRole("button", { name: "使用所选 Runtime 加载预览" }).click();
+
+  await expect(info).toContainText("素材版本 4.3.0");
+  await expect(info).toContainText("Runtime 4.2（手动）");
+  await expect(center).toContainText("JSON 骨骼无效");
+  await expect(page.getByRole("heading", { name: "Region（2）" })).toBeVisible();
+  expect(errors).toEqual([]);
+});

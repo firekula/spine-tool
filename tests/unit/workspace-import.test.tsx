@@ -310,6 +310,7 @@ describe("WorkspaceShell import integration", () => {
   it("Spine 3.8.75 Runtime 失败后保留已准备的 Atlas 导出资源", async () => {
     const bundle = importBundle();
     const exportRelease = vi.fn();
+    const retryBridge = fakeBridge("4.3");
     mocks.classifyImport.mockResolvedValue(bundle);
     mocks.prepareImport.mockResolvedValue({
       bundle,
@@ -330,7 +331,17 @@ describe("WorkspaceShell import integration", () => {
         release: exportRelease,
       },
     } satisfies PreparedImport);
-    mocks.createRuntimeSession.mockRejectedValue(new Error("synthetic 3.8.75 parse failure"));
+    mocks.createRuntimeSession
+      .mockRejectedValueOnce(new Error("synthetic 3.8.75 parse failure"))
+      .mockResolvedValueOnce({
+        bridge: retryBridge,
+        input: {
+          atlasText: "atlas",
+          skeleton: { kind: "json", text: "{}" },
+          textureObjectUrls: new Map(),
+        },
+        release: vi.fn(),
+      } satisfies RuntimeSession);
     render(<WorkspaceShell />);
 
     fireEvent.change(document.querySelector('input[type="file"]')!, {
@@ -345,6 +356,23 @@ describe("WorkspaceShell import integration", () => {
     expect(screen.getByText("Atlas 已就绪，预览尚未可用")).toBeTruthy();
     expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false);
     expect(exportRelease).not.toHaveBeenCalled();
+
+    const picker = screen.getByRole("combobox", { name: "Runtime 版本" });
+    expect(Array.from((picker as HTMLSelectElement).options).map((option) => option.value)).toEqual([
+      "3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3",
+    ]);
+    const automaticInfo = screen.getByRole("group", { name: "Spine 版本信息" });
+    expect(automaticInfo.textContent).toContain("素材版本 3.8.75");
+    expect(automaticInfo.textContent).toContain("Runtime 3.8（自动）");
+
+    await userEvent.setup().selectOptions(picker, "4.3");
+    await userEvent.setup().click(screen.getByRole("button", { name: "使用所选 Runtime 加载预览" }));
+
+    await waitFor(() => expect(mocks.createRuntimeSession).toHaveBeenNthCalledWith(2, bundle, "4.3"));
+    expect(screen.getByRole("group", { name: "Spine 版本信息" }).textContent).toContain("Runtime 4.3（手动）");
+    expect(screen.getByText("synthetic 3.8.75 parse failure")).toBeTruthy();
+    await waitFor(() => expect(retryBridge.load).toHaveBeenCalledTimes(1));
+    await screen.findByText("Spine 4.3 · 预览已就绪");
   });
 
   it("Spine 3.5 SKEL 能力失败后释放 Runtime session 并保留 Atlas 导出资源", async () => {
@@ -398,6 +426,7 @@ describe("WorkspaceShell import integration", () => {
 
     await screen.findByText("当前 Runtime 不支持 SKEL");
     expect(sessionRelease).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("combobox", { name: "Runtime 版本" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Region（1）" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false);
     expect(screen.getByRole("group", { name: "Spine 版本信息" }).textContent).toContain("Runtime 3.5（自动）");

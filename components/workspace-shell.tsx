@@ -277,6 +277,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     });
     replaceSession(null);
     setLoadedMetadata(null);
+    setManualRuntimeRequired(true);
     setStatus("预览不可用 · Atlas 仍可导出");
     dispatch({ type: "IMPORT_FAILED", issue });
   }, [replaceSession]);
@@ -307,6 +308,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         severity: "warning",
         subject: bundle.skeletonFile.name,
       });
+      setManualRuntimeRequired(true);
       setStatus("预览不可用 · Atlas 仍可导出");
       dispatch({ type: "IMPORT_FAILED", issue });
     }
@@ -555,7 +557,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
                   );
                 }}>
                   <h3>手动选择 Runtime</h3>
-                  <p>只在自动识别失败或版本超出支持范围时需要选择。</p>
+                  <p>自动识别失败、版本超出支持范围或 Runtime 加载失败时可在此重试。</p>
                   <label>
                     Runtime 版本
                     <select aria-label="Runtime 版本" value={manualVersion} onChange={(event) => setManualVersion(event.currentTarget.value as SupportedSpineVersion)}>
