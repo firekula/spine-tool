@@ -1,83 +1,29 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, dirname, resolve, sep } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { build } from "vite";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const normalizedRoot = repositoryRoot.split(sep).join("/");
-const isProjectPath = (moduleId, projectPath) => moduleId.startsWith(`${normalizedRoot}${projectPath}`);
-const execFileAsync = promisify(execFile);
+const supportedVersions = ["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3"];
+const javascriptBoundary = "\n\n// ESM boundary added by this project; the runtime above is the official build.\nexport { spine };\n";
+const declarationBoundary = "\ndeclare const spineRuntime: typeof spine;\nexport { spineRuntime as spine };\n";
 
-const runtimes = {
-  "3.8": {
-    entry: "/lib/spine/runtime-3_8.ts",
-    source: "/vendor/spine-runtime-3.8/spine-webgl.js",
-  },
-  "4.0": {
-    alias: "@esotericsoftware/spine-webgl-4.0",
-    entry: "/lib/spine/runtime-4_0.ts",
-    version: "4.0.31",
-    resolved: "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
-    integrity: "sha512-G6j31+caQJck/4UN8TVaTKnU0RPysI7ECMkCxcXBGsTmv98m0O5Wx18YgeIf//Bg8KAO+mZ/DmwzeScwGG9HPA==",
-    tarballSha256: "fdfe7fc72b870a4da238f349634dd043390b5035dbce6782e7e4288adc6648a1",
-  },
-  "4.1": {
-    alias: "@esotericsoftware/spine-webgl-4.1",
-    entry: "/lib/spine/runtime-4_1.ts",
-    version: "4.1.56",
-    resolved: "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
-    integrity: "sha512-LNr/X4B81/rC96mzFV+L5LPnqaIj1v3RBCKTagmFlAd/2MtXcxwEatIQVPq487NigFwlrkvmxQuMpl1TRf3xxw==",
-    tarballSha256: "fc9c0c579e7d91fcba007fabdc7ecced6fad70fca84bd6e3374a3a4f6ac23e4d",
-  },
-  "4.2": {
-    alias: "@esotericsoftware/spine-webgl-4.2",
-    entry: "/lib/spine/runtime-4_2.ts",
-    version: "4.2.120",
-    resolved: "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
-    integrity: "sha512-xhITm18dZ6DclPaI1jEiTVOoXYQASsubbDEs3Ik1AjmVSXdNFtvdvzLVwhPQ8eHu1OXsxtWfuW+wpGHib8V4hw==",
-    tarballSha256: "d1cfacd523602524ed497c8b794cd394a52cc8118cf6a680b4542585e1f36666",
-  },
-};
+const isProjectPath = (moduleId, projectPath) => moduleId.startsWith(`${normalizedRoot}${projectPath}`);
 
 async function json(path) {
   return JSON.parse(await readFile(resolve(repositoryRoot, path), "utf8"));
 }
 
-async function sha256(path) {
-  const contents = await readFile(resolve(repositoryRoot, path));
-  return createHash("sha256").update(contents).digest("hex");
-}
-
-async function packedTarballDigests(version) {
-  const packDirectory = await mkdtemp(resolve(tmpdir(), "spine-runtime-pack-"));
+async function pathExists(path) {
   try {
-    const { stdout } = await execFileAsync(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      [
-        "pack",
-        `@esotericsoftware/spine-webgl@${version}`,
-        "--pack-destination", packDirectory,
-        "--ignore-scripts",
-        "--silent",
-        "--offline",
-        "--registry=https://registry.npmjs.org/",
-      ],
-      { cwd: repositoryRoot, encoding: "utf8" },
-    );
-    const filename = basename(stdout.trim().split(/\r?\n/).at(-1) ?? "");
-    assert.ok(filename.endsWith(".tgz"), `npm pack did not return a tarball for ${version}`);
-    const contents = await readFile(resolve(packDirectory, filename));
-    return {
-      integrity: `sha512-${createHash("sha512").update(contents).digest("base64")}`,
-      sha256: createHash("sha256").update(contents).digest("hex"),
-    };
-  } finally {
-    await rm(packDirectory, { recursive: true, force: true });
+    await stat(resolve(repositoryRoot, path));
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -85,103 +31,144 @@ function sha256Contents(contents) {
   return createHash("sha256").update(contents).digest("hex");
 }
 
+async function sha256(path) {
+  return sha256Contents(await readFile(resolve(repositoryRoot, path)));
+}
+
+async function validateOptionalArchive(source) {
+  if (!await pathExists(source.archivePath)) return;
+  assert.ok(source.archiveSha256, `${source.archivePath} 存在但未固定 SHA-256`);
+  const contents = await readFile(resolve(repositoryRoot, source.archivePath));
+  assert.equal(sha256Contents(contents), source.archiveSha256, `${source.archivePath} SHA-256 不匹配`);
+  if (source.kind === "npm") {
+    const integrity = `sha512-${createHash("sha512").update(contents).digest("base64")}`;
+    assert.equal(integrity, source.integrity, `${source.archivePath} SRI 不匹配`);
+  }
+}
+
 const packageJson = await json("package.json");
 const packageLockPath = process.env.SPINE_RUNTIME_LOCKFILE
   ? resolve(process.env.SPINE_RUNTIME_LOCKFILE)
   : resolve(repositoryRoot, "package-lock.json");
 const packageLock = JSON.parse(await readFile(packageLockPath, "utf8"));
+const sourceManifest = await json("scripts/runtime-sources.json");
 const documentation = await readFile(resolve(repositoryRoot, "docs/runtime-versions.md"), "utf8");
-const provenance = await json("vendor/spine-runtime-3.8/SOURCE.json");
 
-assert.equal(provenance.commit, "8b4844bd4b193ba9e54487ed397a777993cbad56");
-assert.equal(provenance.sourceArchiveSha256, "a31be4f37fb5ffa9b88822c38889efa406fb2201046592b8fdcb6d22925db9a4");
-const javascriptBoundary = "\n\n// ESM boundary added by this project; the runtime above is the official build.\nexport { spine };\n";
-const declarationBoundary = "\ndeclare const spineRuntime: typeof spine;\nexport { spineRuntime as spine };\n";
-const vendoredJavascript = await readFile(
-  resolve(repositoryRoot, "vendor/spine-runtime-3.8/spine-webgl.js"),
-  "utf8",
-);
-const vendoredDeclarations = await readFile(
-  resolve(repositoryRoot, "vendor/spine-runtime-3.8/spine-webgl.d.ts"),
-  "utf8",
-);
-assert.ok(vendoredJavascript.endsWith(javascriptBoundary));
-assert.ok(vendoredDeclarations.endsWith(declarationBoundary));
-assert.equal(
-  sha256Contents(vendoredJavascript.slice(0, -javascriptBoundary.length)),
-  "46fa3cc7d59ccbd81f69f2e04313092243133d3e32e6bca953d63aefdcbdafa3",
-);
-assert.equal(
-  sha256Contents(vendoredDeclarations.slice(0, -declarationBoundary.length)),
-  "da9d140cf744dbb339043c26e3c1b629dc3e3e3b8ba6a20cd29c4d2935ac9047",
-);
-assert.equal(
-  await sha256("vendor/spine-runtime-3.8/spine-webgl.js"),
-  provenance.build.javascriptSha256,
-);
-assert.equal(
-  await sha256("vendor/spine-runtime-3.8/spine-webgl.d.ts"),
-  provenance.build.declarationsSha256,
-);
-assert.equal(
-  await sha256("vendor/spine-runtime-3.8/spine-webgl.js.map"),
-  provenance.build.sourceMapSha256,
-);
-assert.equal(await sha256("vendor/spine-runtime-3.8/LICENSE"), provenance.license.sha256);
-assert.equal(
-  await sha256("public/licenses/SPINE-RUNTIMES-LICENSE.txt"),
-  "435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e",
-);
-assert.equal(
-  await readFile(resolve(repositoryRoot, "public/licenses/SPINE-RUNTIMES-LICENSE.txt"), "utf8"),
-  await readFile(resolve(repositoryRoot, "node_modules/@esotericsoftware/spine-webgl-4.2/LICENSE"), "utf8"),
-);
+assert.equal(sourceManifest.schemaVersion, 1, "Runtime 来源清单 schemaVersion 不受支持");
+assert.deepEqual(Object.keys(sourceManifest.runtimes), supportedVersions, "Runtime 来源清单必须精确覆盖八个版本");
 
+const runtimeDetails = new Map();
 const coreDirectories = new Set();
-for (const [editorVersion, runtime] of Object.entries(runtimes)) {
-  if (editorVersion === "3.8") {
-    assert.ok(documentation.includes(runtime.source.slice(1)));
-    assert.ok(documentation.includes(provenance.sourceArchiveSha256));
+const npmCorePaths = new Map();
+
+for (const version of supportedVersions) {
+  const source = sourceManifest.runtimes[version];
+  assert.match(source.url, /^https:\/\/(github\.com\/EsotericSoftware\/spine-runtimes|registry\.npmjs\.org\/@esotericsoftware\/spine-webgl)/, `${version} 不是官方来源 URL`);
+  await validateOptionalArchive(source);
+
+  if (source.kind === "git-vendor") {
+    assert.match(source.commit, /^[0-9a-f]{40}$/, `${version} commit 格式无效`);
+    assert.ok(source.url.includes(source.commit), `${version} 官方 URL 未固定到 commit`);
+    assert.ok(documentation.includes(source.commit), `文档缺少 ${version} commit`);
+
+    const sourceRecordPath = `${source.vendorDirectory}/SOURCE.json`;
+    if (!await pathExists(sourceRecordPath)) {
+      assert.match(source.archiveSha256, /^[0-9a-f]{64}$/, `${version} 来源归档 SHA-256 未固定`);
+      assert.equal(source.buildArtifacts, null, `${version} 尚未集成却声明构建产物已验证`);
+      assert.match(source.licenseSha256, /^[0-9a-f]{64}$/, `${version} 官方许可证 SHA-256 未固定`);
+      assert.equal(await pathExists(source.entry), false, `${version} 有 Runtime entry 但没有 SOURCE.json`);
+      assert.ok(documentation.includes(source.archiveSha256), `文档缺少 ${version} 来源归档 SHA-256`);
+      assert.ok(documentation.includes(source.licenseSha256), `文档缺少 ${version} 官方许可证 SHA-256`);
+      console.log(`${version}: 官方 git 来源已固定（Runtime 待集成）`);
+      continue;
+    }
+
+    assert.ok(source.archiveSha256, `${version} vendor 缺少来源归档 SHA-256`);
+    assert.ok(source.buildArtifacts, `${version} vendor 缺少构建产物 SHA-256`);
+    assert.ok(source.licenseSha256, `${version} vendor 缺少许可证 SHA-256`);
+    const provenance = await json(sourceRecordPath);
+    assert.equal(provenance.commit, source.commit, `${version} SOURCE.json commit 不匹配`);
+    assert.equal(provenance.sourceArchiveSha256, source.archiveSha256, `${version} 来源归档 SHA-256 不匹配`);
+    assert.equal(provenance.license.sha256, source.licenseSha256, `${version} SOURCE.json 许可证 SHA-256 不匹配`);
+
+    const javascript = await readFile(resolve(repositoryRoot, source.vendorDirectory, "spine-webgl.js"), "utf8");
+    const declarations = await readFile(resolve(repositoryRoot, source.vendorDirectory, "spine-webgl.d.ts"), "utf8");
+    assert.ok(javascript.endsWith(javascriptBoundary), `${version} JavaScript 缺少固定 ESM 边界`);
+    assert.ok(declarations.endsWith(declarationBoundary), `${version} declaration 缺少固定 ESM 边界`);
+    assert.equal(
+      sha256Contents(javascript.slice(0, -javascriptBoundary.length)),
+      source.buildArtifacts["spine-webgl.js"].upstreamSha256,
+      `${version} 官方 JavaScript 构建产物 SHA-256 不匹配`,
+    );
+    assert.equal(
+      sha256Contents(declarations.slice(0, -declarationBoundary.length)),
+      source.buildArtifacts["spine-webgl.d.ts"].upstreamSha256,
+      `${version} 官方 declaration 构建产物 SHA-256 不匹配`,
+    );
+    for (const [artifact, digests] of Object.entries(source.buildArtifacts)) {
+      assert.equal(await sha256(`${source.vendorDirectory}/${artifact}`), digests.sha256, `${version} ${artifact} SHA-256 不匹配`);
+    }
+    assert.equal(await sha256(`${source.vendorDirectory}/LICENSE`), source.licenseSha256, `${version} 许可证 SHA-256 不匹配`);
+    assert.ok(documentation.includes(source.archiveSha256), `文档缺少 ${version} 来源归档 SHA-256`);
+    runtimeDetails.set(version, {
+      ...source,
+      moduleSource: `/${source.vendorDirectory}/spine-webgl.js`,
+    });
+    console.log(`${version}: 官方 git vendor 来源与构建产物已验证`);
     continue;
   }
 
-  const dependencyValue = `npm:@esotericsoftware/spine-webgl@${runtime.version}`;
-  assert.equal(packageJson.dependencies[runtime.alias], dependencyValue);
-  const packagePath = `node_modules/@esotericsoftware/${runtime.alias.split("/").at(-1)}`;
+  assert.equal(source.kind, "npm", `${version} Runtime 来源 kind 无效`);
+  const dependencyValue = `npm:${source.package}@${source.version}`;
+  assert.equal(packageJson.dependencies[source.alias], dependencyValue, `${version} package.json alias 不匹配`);
+  assert.equal(packageLock.packages[""].dependencies[source.alias], dependencyValue, `${version} lockfile 根 alias 不匹配`);
+  const packagePath = `node_modules/${source.alias}`;
   const installedPackage = await json(`${packagePath}/package.json`);
   const lockedPackage = packageLock.packages[packagePath];
-  assert.equal(installedPackage.version, runtime.version);
-  assert.equal(lockedPackage.version, runtime.version);
-  assert.equal(lockedPackage.dependencies["@esotericsoftware/spine-core"], runtime.version);
-  assert.equal(lockedPackage.resolved, runtime.resolved);
-  assert.equal(lockedPackage.integrity, runtime.integrity);
-  assert.ok(documentation.includes(runtime.tarballSha256));
-  const packedTarball = await packedTarballDigests(runtime.version);
-  assert.equal(packedTarball.integrity, runtime.integrity);
-  assert.equal(packedTarball.sha256, runtime.tarballSha256);
-  console.log(`${editorVersion}: official npm tarball SHA-256 ${packedTarball.sha256}`);
-  assert.equal(
-    await sha256(`${packagePath}/LICENSE`),
-    runtime.version === "4.2.120"
-      ? "435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e"
-      : "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39",
-  );
+  assert.ok(lockedPackage, `${version} lockfile 缺少 alias package`);
+  assert.equal(installedPackage.version, source.version, `${version} 已安装 package 版本不匹配`);
+  assert.equal(lockedPackage.version, source.version, `${version} lockfile package 版本不匹配`);
+  assert.equal(installedPackage.dependencies["@esotericsoftware/spine-core"], source.version, `${version} 已安装 core 依赖版本不匹配`);
+  assert.equal(lockedPackage.dependencies["@esotericsoftware/spine-core"], source.version, `${version} lockfile core 依赖版本不匹配`);
+  assert.equal(lockedPackage.resolved, source.url, `${version} lockfile resolved 不是固定官方 URL`);
+  assert.equal(lockedPackage.integrity, source.integrity, `${version} lockfile integrity 不匹配`);
 
   const nestedCore = `${packagePath}/node_modules/@esotericsoftware/spine-core`;
   const rootCore = "node_modules/@esotericsoftware/spine-core";
-  let corePath = nestedCore;
-  try {
-    await readFile(resolve(repositoryRoot, nestedCore, "package.json"));
-  } catch {
-    corePath = rootCore;
-  }
+  const corePath = await pathExists(`${nestedCore}/package.json`) ? nestedCore : rootCore;
   const corePackage = await json(`${corePath}/package.json`);
-  assert.equal(corePackage.version, runtime.version);
-  runtime.packagePath = `/${packagePath}/`;
-  runtime.corePath = `/${corePath}/`;
+  const lockedCore = packageLock.packages[corePath];
+  assert.ok(lockedCore, `${version} lockfile 缺少独立 core package`);
+  assert.equal(corePackage.version, source.version, `${version} 已安装 core 版本不匹配`);
+  assert.equal(lockedCore.version, source.version, `${version} lockfile core 版本不匹配`);
   coreDirectories.add(corePath);
+  npmCorePaths.set(version, `/${corePath}/`);
+
+  for (const [artifact, expectedSha256] of Object.entries(source.buildArtifacts)) {
+    assert.equal(await sha256(`${packagePath}/${artifact}`), expectedSha256, `${version} ${artifact} SHA-256 不匹配`);
+  }
+  assert.equal(await sha256(`${packagePath}/LICENSE`), source.licenseSha256, `${version} 许可证 SHA-256 不匹配`);
+  assert.ok(documentation.includes(source.archiveSha256), `文档缺少 ${version} tarball SHA-256`);
+  assert.ok(documentation.includes(source.integrity), `文档缺少 ${version} 完整 SRI`);
+
+  if (await pathExists(source.entry)) {
+    runtimeDetails.set(version, {
+      ...source,
+      moduleSource: `/${packagePath}/`,
+      corePath: `/${corePath}/`,
+    });
+    console.log(`${version}: 官方 npm 来源、安装产物与 core 已验证`);
+  } else {
+    console.log(`${version}: 官方 npm 来源与安装产物已验证（Runtime 待集成）`);
+  }
 }
-assert.equal(coreDirectories.size, 3, "4.x runtimes must resolve to three physical core packages");
+
+assert.equal(coreDirectories.size, 4, "4.x Runtime 必须解析到四个独立 core package");
+assert.equal(
+  await sha256("public/licenses/SPINE-RUNTIMES-LICENSE.txt"),
+  sourceManifest.runtimes["4.2"].licenseSha256,
+  "公开许可证副本 SHA-256 不匹配",
+);
 
 const buildResult = await build({
   configFile: false,
@@ -200,33 +187,31 @@ const buildResult = await build({
 const outputs = Array.isArray(buildResult) ? buildResult : [buildResult];
 const chunks = outputs.flatMap((output) => output.output).filter((item) => item.type === "chunk");
 
-for (const [editorVersion, runtime] of Object.entries(runtimes)) {
-  const chunk = chunks.find((candidate) => (
-    candidate.facadeModuleId?.split(sep).join("/").endsWith(runtime.entry)
-  ));
-  assert.ok(chunk, `missing dynamic runtime chunk for ${editorVersion}`);
+for (const [version, runtime] of runtimeDetails) {
+  const chunk = chunks.find((candidate) => candidate.facadeModuleId?.split(sep).join("/").endsWith(`/${runtime.entry}`));
+  assert.ok(chunk, `缺少 Spine ${version} 动态 Runtime chunk`);
   const modules = Object.keys(chunk.modules).map((id) => id.split(sep).join("/"));
-  const expectedSource = editorVersion === "3.8" ? runtime.source : runtime.packagePath;
-  assert.ok(modules.some((id) => id.includes(expectedSource)), `${editorVersion} chunk misses ${expectedSource}`);
-
-  if (editorVersion !== "3.8") {
-    assert.ok(modules.some((id) => isProjectPath(id, runtime.corePath)), `${editorVersion} chunk misses own core`);
+  assert.ok(modules.some((id) => id.includes(runtime.moduleSource)), `${version} chunk 缺少自身 Runtime 来源`);
+  if (runtime.kind === "npm") {
+    assert.ok(modules.some((id) => isProjectPath(id, runtime.corePath)), `${version} chunk 缺少自身 core`);
   }
 
-  for (const [otherVersion, otherRuntime] of Object.entries(runtimes)) {
-    if (otherVersion === editorVersion) continue;
-    const forbidden = otherVersion === "3.8" ? otherRuntime.source : otherRuntime.packagePath;
-    assert.ok(!modules.some((id) => id.includes(forbidden)), `${editorVersion} chunk imports ${otherVersion}`);
-    if (otherVersion !== "3.8") {
-      assert.ok(
-        !modules.some((id) => isProjectPath(id, otherRuntime.corePath)),
-        `${editorVersion} chunk imports ${otherVersion} core`,
-      );
+  for (const [otherVersion, otherSource] of Object.entries(sourceManifest.runtimes)) {
+    if (otherVersion === version) continue;
+    const otherModuleSource = otherSource.kind === "npm"
+      ? `/node_modules/${otherSource.alias}/`
+      : `/${otherSource.vendorDirectory}/spine-webgl.js`;
+    assert.ok(!modules.some((id) => id.includes(otherModuleSource)), `${version} chunk 导入了 ${otherVersion} Runtime`);
+    if (otherSource.kind === "npm") {
+      const otherCorePath = npmCorePaths.get(otherVersion);
+      if (otherCorePath) {
+        assert.ok(!modules.some((id) => isProjectPath(id, otherCorePath)), `${version} chunk 导入了 ${otherVersion} core`);
+      }
     }
   }
 
-  const relativeChunk = chunk.fileName.replace(normalizedRoot, "");
-  console.log(`${editorVersion}: ${relativeChunk} (${modules.length} modules)`);
+  console.log(`${version}: ${chunk.fileName}（${modules.length} modules，隔离 chunk）`);
 }
 
-console.log("Verified 4 isolated Spine runtimes");
+console.log(`已验证 ${supportedVersions.length} 条 Spine Runtime 固定来源`);
+console.log(`已验证 ${runtimeDetails.size} 个隔离 Spine Runtime chunk`);

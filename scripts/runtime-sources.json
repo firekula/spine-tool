@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "runtimes": {
+    "3.5": {
+      "kind": "git-vendor",
+      "branch": "3.5",
+      "commit": "afdbbc2044fb56c762d4e2eb54b63b1bb9276a48",
+      "url": "https://github.com/EsotericSoftware/spine-runtimes/tree/afdbbc2044fb56c762d4e2eb54b63b1bb9276a48/spine-ts",
+      "archivePath": "vendor/source/spine-runtimes-3.5-afdbbc2044fb56c762d4e2eb54b63b1bb9276a48.tar",
+      "archiveSha256": "a40a64268da2782405b66516c45736f7c86d438fe82e8e950733b5f3aa74a7c5",
+      "entry": "lib/spine/runtime-3_5.ts",
+      "vendorDirectory": "vendor/spine-runtime-3.5",
+      "build": null,
+      "buildArtifacts": null,
+      "licenseSha256": "d2af98ecac7e4bb6e4c4491fc734db7762b94626b18bcc87c7eac6febd86e1b5"
+    },
+    "3.6": {
+      "kind": "git-vendor",
+      "branch": "3.6",
+      "commit": "654c20e5b0e523040b6366bbd1042510d2645134",
+      "url": "https://github.com/EsotericSoftware/spine-runtimes/tree/654c20e5b0e523040b6366bbd1042510d2645134/spine-ts",
+      "archivePath": "vendor/source/spine-runtimes-3.6-654c20e5b0e523040b6366bbd1042510d2645134.tar",
+      "archiveSha256": "cb9da14b05076037bdfc136840f3a1ab5a50da6390da0a3e5e2dbe8a0b7348e9",
+      "entry": "lib/spine/runtime-3_6.ts",
+      "vendorDirectory": "vendor/spine-runtime-3.6",
+      "build": null,
+      "buildArtifacts": null,
+      "licenseSha256": "d2af98ecac7e4bb6e4c4491fc734db7762b94626b18bcc87c7eac6febd86e1b5"
+    },
+    "3.7": {
+      "kind": "git-vendor",
+      "branch": "3.7",
+      "commit": "9639bcc81722d7178fd9d1cdc1a3d55a4c91f989",
+      "url": "https://github.com/EsotericSoftware/spine-runtimes/tree/9639bcc81722d7178fd9d1cdc1a3d55a4c91f989/spine-ts",
+      "archivePath": "vendor/source/spine-runtimes-3.7-9639bcc81722d7178fd9d1cdc1a3d55a4c91f989.tar",
+      "archiveSha256": "6d955be39f6898cfaeec2b9a0e0f475c8437f8d550eedf9ef618937eadf043eb",
+      "entry": "lib/spine/runtime-3_7.ts",
+      "vendorDirectory": "vendor/spine-runtime-3.7",
+      "build": null,
+      "buildArtifacts": null,
+      "licenseSha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
+    },
+    "3.8": {
+      "kind": "git-vendor",
+      "branch": "3.8",
+      "commit": "8b4844bd4b193ba9e54487ed397a777993cbad56",
+      "url": "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
+      "archivePath": "vendor/source/spine-runtimes-3.8-8b4844bd4b193ba9e54487ed397a777993cbad56.tar",
+      "archiveSha256": "a31be4f37fb5ffa9b88822c38889efa406fb2201046592b8fdcb6d22925db9a4",
+      "entry": "lib/spine/runtime-3_8.ts",
+      "vendorDirectory": "vendor/spine-runtime-3.8",
+      "build": {
+        "sourceDirectory": "spine-ts",
+        "typescript": "3.9.10",
+        "offscreencanvasTypes": "2019.7.3",
+        "tsconfig": "tsconfig.webgl.json",
+        "outputDirectory": "build"
+      },
+      "buildArtifacts": {
+        "spine-webgl.js": {
+          "upstreamSha256": "46fa3cc7d59ccbd81f69f2e04313092243133d3e32e6bca953d63aefdcbdafa3",
+          "sha256": "f50f6e18535881b5563b12bf0fa16a12972125677da3496959acdd5ed2619123"
+        },
+        "spine-webgl.d.ts": {
+          "upstreamSha256": "da9d140cf744dbb339043c26e3c1b629dc3e3e3b8ba6a20cd29c4d2935ac9047",
+          "sha256": "8a766f6566fca1607be4cc0e0655e0a9c35cdea7c4b41d77092c255196dcd170"
+        },
+        "spine-webgl.js.map": {
+          "sha256": "ab06ecf9eae08c4ff73d7f35fd13fba43449b02d77910607c88a60ac6ee4a641"
+        }
+      },
+      "licenseSha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
+    },
+    "4.0": {
+      "kind": "npm",
+      "alias": "@esotericsoftware/spine-webgl-4.0",
+      "package": "@esotericsoftware/spine-webgl",
+      "version": "4.0.31",
+      "url": "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
+      "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.0.31.tgz",
+      "archiveSha256": "fdfe7fc72b870a4da238f349634dd043390b5035dbce6782e7e4288adc6648a1",
+      "integrity": "sha512-G6j31+caQJck/4UN8TVaTKnU0RPysI7ECMkCxcXBGsTmv98m0O5Wx18YgeIf//Bg8KAO+mZ/DmwzeScwGG9HPA==",
+      "entry": "lib/spine/runtime-4_0.ts",
+      "buildArtifacts": {
+        "dist/index.js": "8e13939caf2656702877c228e98a8f5bae1a61aeda7dcb62c45e0629a10a3211",
+        "dist/index.d.ts": "9ed8835324aac10591c2649c66a5aca6b3e33233d53b9d8b99175c8a9ebbcfa3"
+      },
+      "licenseSha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
+    },
+    "4.1": {
+      "kind": "npm",
+      "alias": "@esotericsoftware/spine-webgl-4.1",
+      "package": "@esotericsoftware/spine-webgl",
+      "version": "4.1.56",
+      "url": "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
+      "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.1.56.tgz",
+      "archiveSha256": "fc9c0c579e7d91fcba007fabdc7ecced6fad70fca84bd6e3374a3a4f6ac23e4d",
+      "integrity": "sha512-LNr/X4B81/rC96mzFV+L5LPnqaIj1v3RBCKTagmFlAd/2MtXcxwEatIQVPq487NigFwlrkvmxQuMpl1TRf3xxw==",
+      "entry": "lib/spine/runtime-4_1.ts",
+      "buildArtifacts": {
+        "dist/index.js": "cfceae5ac042d22604bb17bdc65af72417614f8bd4289e267b253963119cd146",
+        "dist/index.d.ts": "d9147ff104dd31c3cf50d98172a4611db01f5f19640df94bba92477874878480"
+      },
+      "licenseSha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
+    },
+    "4.2": {
+      "kind": "npm",
+      "alias": "@esotericsoftware/spine-webgl-4.2",
+      "package": "@esotericsoftware/spine-webgl",
+      "version": "4.2.120",
+      "url": "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
+      "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.2.120.tgz",
+      "archiveSha256": "d1cfacd523602524ed497c8b794cd394a52cc8118cf6a680b4542585e1f36666",
+      "integrity": "sha512-xhITm18dZ6DclPaI1jEiTVOoXYQASsubbDEs3Ik1AjmVSXdNFtvdvzLVwhPQ8eHu1OXsxtWfuW+wpGHib8V4hw==",
+      "entry": "lib/spine/runtime-4_2.ts",
+      "buildArtifacts": {
+        "dist/index.js": "ec7195512119f46b8e470dc91b7c6874efe2ab95e2648c5168c60d9213ffe561",
+        "dist/index.d.ts": "d9147ff104dd31c3cf50d98172a4611db01f5f19640df94bba92477874878480"
+      },
+      "licenseSha256": "435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e"
+    },
+    "4.3": {
+      "kind": "npm",
+      "alias": "@esotericsoftware/spine-webgl-4.3",
+      "package": "@esotericsoftware/spine-webgl",
+      "version": "4.3.9",
+      "url": "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz",
+      "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.3.9.tgz",
+      "archiveSha256": "fd8f6a38f9ab394e84801967209c304738c7ac84f1db9a7d8b0428203114b390",
+      "integrity": "sha512-eAcqxurSXyGeQg9RFlqSUOqEiMYQcKsKKgcxzNwzcu18G7tcUZMcX7cB5zkN1mlfxtuGtZVx5bmGYSlUBUTrkQ==",
+      "entry": "lib/spine/runtime-4_3.ts",
+      "buildArtifacts": {
+        "dist/index.js": "4fda161f006026a202308593df47c54fc78a742631e1f8d2bc15a262a93e68d3",
+        "dist/index.d.ts": "5da3a45502e3fb1e6c9a7cf31786815558bbe429926c2f5ef2b0b6fbc4493b01"
+      },
+      "licenseSha256": "435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e"
+    }
+  }
+}

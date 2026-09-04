@@ -64,6 +64,64 @@ describe("loadRuntimeModule", () => {
 });
 
 describe("Runtime 资产验证", () => {
+  it("Runtime 来源验证不依赖 npm cache", () => {
+    const emptyCache = mkdtempSync(join(tmpdir(), "empty-npm-cache-"));
+    try {
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, npm_config_cache: emptyCache },
+          stdio: "pipe",
+        },
+      )).not.toThrow();
+    } finally {
+      rmSync(emptyCache, { recursive: true, force: true });
+    }
+  });
+
+  it("legacy vendor 拒绝与固定来源不符的 commit", () => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-source-"));
+    const fixtureArchive = join(fixtureDirectory, "source.tar");
+    writeFileSync(fixtureArchive, "not an official archive");
+    try {
+      expect(() => execFileSync(
+        process.execPath,
+        [
+          resolve(repositoryRoot, "scripts/vendor-legacy-runtime.mjs"),
+          "--version", "3.8",
+          "--commit", "0000000000000000000000000000000000000000",
+          "--archive", fixtureArchive,
+        ],
+        { cwd: repositoryRoot, encoding: "utf8", stdio: "pipe" },
+      )).toThrow(/commit 与固定官方来源不符/);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("legacy vendor 拒绝 SHA-256 不匹配的来源归档", () => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-source-"));
+    const fixtureArchive = join(fixtureDirectory, "source.tar");
+    writeFileSync(fixtureArchive, "not an official archive");
+    try {
+      expect(() => execFileSync(
+        process.execPath,
+        [
+          resolve(repositoryRoot, "scripts/vendor-legacy-runtime.mjs"),
+          "--version", "3.8",
+          "--commit", "8b4844bd4b193ba9e54487ed397a777993cbad56",
+          "--archive", fixtureArchive,
+        ],
+        { cwd: repositoryRoot, encoding: "utf8", stdio: "pipe" },
+      )).toThrow(/来源归档 SHA-256 不匹配/);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("验证版本、真实动态 chunk 来源、core 隔离、SHA-256 和许可", () => {
     const output = execFileSync(
       process.execPath,
@@ -71,7 +129,8 @@ describe("Runtime 资产验证", () => {
       { cwd: repositoryRoot, encoding: "utf8" },
     );
 
-    expect(output).toContain("Verified 4 isolated Spine runtimes");
+    expect(output).toContain("已验证 8 条 Spine Runtime 固定来源");
+    expect(output).toContain("已验证 4 个隔离 Spine Runtime chunk");
   });
 
   it.each([
