@@ -99,7 +99,9 @@
       "branch": "3.8",
       "commit": "8b4844bd4b193ba9e54487ed397a777993cbad56",
       "url": "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
-      "archivePath": "vendor/source/spine-runtimes-3.8-8b4844bd4b193ba9e54487ed397a777993cbad56.tar",
+      "archivePath": "vendor/source/spine-runtimes-3.8-8b4844bd4b193ba9e54487ed397a777993cbad56.tar.gz",
+      "archiveCompression": "gzip",
+      "archiveFileSha256": "258c42722ae77b0e115a52c0d5dde05671d513cc3cad257dd453097e9373e693",
       "archiveSha256": "a31be4f37fb5ffa9b88822c38889efa406fb2201046592b8fdcb6d22925db9a4",
       "patch": {
         "path": "vendor/spine-runtime-3.8/patches/allow-3.8.75.patch",
@@ -110,7 +112,21 @@
       "build": {
         "sourceDirectory": "spine-ts",
         "typescript": "3.9.10",
+        "typescriptPackage": {
+          "alias": "typescript-3.9",
+          "package": "typescript",
+          "version": "3.9.10",
+          "url": "https://registry.npmjs.org/typescript/-/typescript-3.9.10.tgz",
+          "integrity": "sha512-w6fIxVE/H1PkLKcCPsFqKE7Kv7QUwhU8qQY2MueZXWx5cPZdwFupLgKK3vntcK98BtNHZtAF4LA/yl2a7k8R6Q=="
+        },
         "offscreencanvasTypes": "2019.7.3",
+        "offscreencanvasTypesPackage": {
+          "alias": "offscreencanvas-types-2019",
+          "package": "@types/offscreencanvas",
+          "version": "2019.7.3",
+          "url": "https://registry.npmjs.org/@types/offscreencanvas/-/offscreencanvas-2019.7.3.tgz",
+          "integrity": "sha512-ieXiYmgSRXUDeOntE1InxjWyvEelZGP63M+cGuquuRLuIKKT1osnkXjxev9B7d1nXSug5vpunx+gNlbVxMlC9A=="
+        },
         "tsconfig": "tsconfig.webgl.json",
         "outputDirectory": "build"
       },

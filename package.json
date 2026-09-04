@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "build:offline": "tsc --noEmit && vite build --config vite.offline.config.ts",
     "verify-runtime-assets": "node scripts/verify-runtime-assets.mjs",
+    "verify-runtime-assets:fast": "node scripts/verify-runtime-assets.mjs --fast",
+    "prepackage:offline": "npm run verify-runtime-assets",
     "package:offline": "node scripts/package-offline.mjs"
   },
   "dependencies": {
@@ -31,8 +33,10 @@
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.4",
     "jsdom": "^26.1.0",
+    "offscreencanvas-types-2019": "npm:@types/offscreencanvas@2019.7.3",
     "parse5": "7.3.0",
     "typescript": "5.7.2",
+    "typescript-3.9": "npm:typescript@3.9.10",
     "vite": "6.0.3",
     "vitest": "2.1.8"
   }

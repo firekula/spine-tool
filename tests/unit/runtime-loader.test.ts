@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +36,31 @@ const EXPECTED_SOURCES = {
 } as const;
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
+
+function verifierFixtureWithPatch(patch: string): { directory: string; manifest: string } {
+  const directory = mkdtempSync(join(tmpdir(), "spine-runtime-patch-fixture-"));
+  const vendorDirectory = join(directory, "vendor");
+  cpSync(resolve(repositoryRoot, "vendor/spine-runtime-3.8"), vendorDirectory, { recursive: true });
+
+  const patchPath = join(directory, "candidate.patch");
+  writeFileSync(patchPath, patch);
+  const patchRecord = {
+    path: patchPath,
+    sha256: createHash("sha256").update(patch).digest("hex"),
+  };
+
+  const provenancePath = join(vendorDirectory, "SOURCE.json");
+  const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
+  provenance.patch = patchRecord;
+  writeFileSync(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`);
+
+  const sourceManifest = JSON.parse(readFileSync(resolve(repositoryRoot, "scripts/runtime-sources.json"), "utf8"));
+  sourceManifest.runtimes["3.8"].patch = patchRecord;
+  sourceManifest.runtimes["3.8"].vendorDirectory = vendorDirectory;
+  const manifest = join(directory, "runtime-sources.json");
+  writeFileSync(manifest, JSON.stringify(sourceManifest));
+  return { directory, manifest };
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -84,19 +110,27 @@ describe("loadRuntimeModule", () => {
 });
 
 describe("Runtime 资产验证", () => {
-  it("Runtime 来源验证不依赖 npm cache", () => {
+  it("默认严格重建 3.8 Runtime 且不依赖 npm cache", () => {
     const emptyCache = mkdtempSync(join(tmpdir(), "empty-npm-cache-"));
     try {
-      expect(() => execFileSync(
+      const output = execFileSync(
         process.execPath,
         [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
         {
           cwd: repositoryRoot,
           encoding: "utf8",
-          env: { ...process.env, npm_config_cache: emptyCache },
+          env: {
+            ...process.env,
+            NPM_CONFIG_CACHE: emptyCache,
+            npm_config_cache: emptyCache,
+            NPM_CONFIG_OFFLINE: "true",
+            npm_config_offline: "true",
+          },
           stdio: "pipe",
         },
-      )).not.toThrow();
+      );
+
+      expect(output).toContain("3.8: 已从固定归档与 patch 重建 Runtime");
     } finally {
       rmSync(emptyCache, { recursive: true, force: true });
     }
@@ -149,8 +183,43 @@ describe("Runtime 资产验证", () => {
       { cwd: repositoryRoot, encoding: "utf8" },
     );
 
+    expect(output).toContain("3.8: 已从固定归档与 patch 重建 Runtime");
     expect(output).toContain("已验证 8 条 Spine Runtime 固定来源");
     expect(output).toContain("已验证 7 个隔离 Spine Runtime chunk");
+  });
+
+  it("快速验证明确标记未进行严格重建", () => {
+    const output = execFileSync(
+      process.execPath,
+      [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    );
+
+    expect(output).toContain("快速验证完成：未重建 3.8 Runtime；不得用于 CI 或发布门禁");
+    expect(output).not.toContain("3.8: 已从固定归档与 patch 重建 Runtime");
+  });
+
+  it("默认严格验证在固定 3.8 archive 缺失时失败", () => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-missing-archive-"));
+    const fixtureManifest = join(fixtureDirectory, "runtime-sources.json");
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, "scripts/runtime-sources.json"), "utf8"));
+      manifest.runtimes["3.8"].archivePath = join(fixtureDirectory, "missing-source.tar.gz");
+      writeFileSync(fixtureManifest, JSON.stringify(manifest));
+
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixtureManifest },
+          stdio: "pipe",
+        },
+      )).toThrow(/严格重建所需的 3\.8 来源归档不存在/);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
   });
 
   it("拒绝 3.8 兼容 patch 的 SHA-256 不匹配", () => {
@@ -163,7 +232,7 @@ describe("Runtime 资产验证", () => {
 
       expect(() => execFileSync(
         process.execPath,
-        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
         {
           cwd: repositoryRoot,
           encoding: "utf8",
@@ -190,7 +259,7 @@ describe("Runtime 资产验证", () => {
 
       expect(() => execFileSync(
         process.execPath,
-        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
         {
           cwd: repositoryRoot,
           encoding: "utf8",
@@ -200,6 +269,54 @@ describe("Runtime 资产验证", () => {
       )).toThrow(/上游与补丁构建 SHA-256/);
     } finally {
       rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("拒绝 patch 的 ---/+++ 文件头与 diff --git 声明路径不一致", () => {
+    const original = readFileSync(resolve(repositoryRoot, "vendor/spine-runtime-3.8/patches/allow-3.8.75.patch"), "utf8");
+    const malicious = original.replace(
+      "--- a/spine-ts/core/src/SkeletonBinary.ts",
+      "--- a/spine-ts/core/src/UnrelatedBinary.ts",
+    );
+    const fixture = verifierFixtureWithPatch(malicious);
+    try {
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixture.manifest },
+          stdio: "pipe",
+        },
+      )).toThrow(/patch 文件头路径必须与 diff --git 声明一致/);
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("拒绝以 +++ 开头伪装成文件头的 patch 新增代码", () => {
+    const original = readFileSync(resolve(repositoryRoot, "vendor/spine-runtime-3.8/patches/allow-3.8.75.patch"), "utf8");
+    const malicious = original
+      .replace("@@ -81,8 +81,6 @@ module spine {", "@@ -81,8 +81,7 @@ module spine {")
+      .replace(
+        '-\t\t\t\t\tthrow new Error("Unsupported skeleton data, please export with a newer version of Spine.");',
+        '-\t\t\t\t\tthrow new Error("Unsupported skeleton data, please export with a newer version of Spine.");\n+++compatBypass;',
+      );
+    const fixture = verifierFixtureWithPatch(malicious);
+    try {
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixture.manifest },
+          stdio: "pipe",
+        },
+      )).toThrow(/patch 不允许新增代码/);
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
     }
   });
 
@@ -217,7 +334,7 @@ describe("Runtime 资产验证", () => {
 
       expect(() => execFileSync(
         process.execPath,
-        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
         {
           cwd: repositoryRoot,
           encoding: "utf8",
@@ -244,7 +361,7 @@ describe("Runtime 资产验证", () => {
 
       expect(() => execFileSync(
         process.execPath,
-        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
         {
           cwd: repositoryRoot,
           encoding: "utf8",
@@ -277,7 +394,7 @@ describe("Runtime 资产验证", () => {
 
       expect(() => execFileSync(
         process.execPath,
-        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), "--fast"],
         {
           cwd: repositoryRoot,
           encoding: "utf8",

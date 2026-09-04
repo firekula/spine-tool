@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { gunzipSync } from "node:zlib";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,6 +58,18 @@ async function run(command, args, options) {
 }
 
 async function compileRuntime(source, sourceDirectory) {
+  if (source.build.typescriptPackage) {
+    const compilerDirectory = resolve(repositoryRoot, "node_modules", source.build.typescriptPackage.alias);
+    const compilerPackage = JSON.parse(await readFile(resolve(compilerDirectory, "package.json"), "utf8"));
+    assert.equal(compilerPackage.name, source.build.typescriptPackage.package, "固定 TypeScript package 名称不匹配");
+    assert.equal(compilerPackage.version, source.build.typescriptPackage.version, "固定 TypeScript package 版本不匹配");
+    await run(
+      process.execPath,
+      [resolve(compilerDirectory, "bin/tsc"), "-p", source.build.tsconfig],
+      { cwd: sourceDirectory },
+    );
+    return;
+  }
   await run(
     process.platform === "win32" ? "npx.cmd" : "npx",
     [
@@ -76,7 +89,17 @@ async function readBuildArtifacts(buildDirectory) {
 }
 
 async function buildRuntime(source, archivePath, outputDirectory) {
-  const archiveContents = await readFile(archivePath);
+  const archiveFileContents = await readFile(archivePath);
+  if (source.archiveCompression === "gzip") {
+    assert.equal(
+      digest(archiveFileContents),
+      source.archiveFileSha256,
+      "来源归档 SHA-256 不匹配（压缩文件）",
+    );
+  }
+  const archiveContents = source.archiveCompression === "gzip"
+    ? gunzipSync(archiveFileContents)
+    : archiveFileContents;
   assert.equal(
     digest(archiveContents),
     source.archiveSha256,
@@ -85,7 +108,7 @@ async function buildRuntime(source, archivePath, outputDirectory) {
 
   const workDirectory = await mkdtemp(resolve(tmpdir(), "spine-legacy-runtime-"));
   try {
-    await run("tar", ["-xf", archivePath, "-C", workDirectory], { cwd: repositoryRoot });
+    await run("tar", [source.archiveCompression === "gzip" ? "-xzf" : "-xf", archivePath, "-C", workDirectory], { cwd: repositoryRoot });
     const sourceDirectory = resolve(workDirectory, source.build.sourceDirectory);
     let patchPath = null;
     if (source.patch) {
@@ -96,7 +119,15 @@ async function buildRuntime(source, archivePath, outputDirectory) {
       // patch is stored with repository-standard LF line endings.
       await run("git", ["apply", "--check", "--ignore-space-change", patchPath], { cwd: workDirectory });
     }
-    if (source.build.offscreencanvasTypes) {
+    if (source.build.offscreencanvasTypesPackage) {
+      const typesDirectory = resolve(repositoryRoot, "node_modules", source.build.offscreencanvasTypesPackage.alias);
+      const typesPackage = JSON.parse(await readFile(resolve(typesDirectory, "package.json"), "utf8"));
+      assert.equal(typesPackage.name, source.build.offscreencanvasTypesPackage.package, "固定 OffscreenCanvas types package 名称不匹配");
+      assert.equal(typesPackage.version, source.build.offscreencanvasTypesPackage.version, "固定 OffscreenCanvas types package 版本不匹配");
+      const destination = resolve(sourceDirectory, "node_modules/@types/offscreencanvas");
+      await mkdir(dirname(destination), { recursive: true });
+      await cp(typesDirectory, destination, { recursive: true });
+    } else if (source.build.offscreencanvasTypes) {
       await run(
         process.platform === "win32" ? "npm.cmd" : "npm",
         [
@@ -172,11 +203,19 @@ async function buildRuntime(source, archivePath, outputDirectory) {
       commit: source.commit,
       sourcePath: source.build.sourceDirectory,
       sourceArchiveSha256: source.archiveSha256,
+      ...(source.archiveCompression ? {
+        sourceArchiveCompression: source.archiveCompression,
+        sourceArchiveFileSha256: source.archiveFileSha256,
+      } : {}),
       ...(source.patch ? { patch: source.patch } : {}),
       build: {
         typescript: source.build.typescript,
+        ...(source.build.typescriptPackage ? { typescriptPackage: source.build.typescriptPackage } : {}),
         offscreencanvasTypes: source.build.offscreencanvasTypes,
-        command: `npx --yes --package typescript@${source.build.typescript} tsc -p ${source.build.tsconfig}`,
+        ...(source.build.offscreencanvasTypesPackage ? { offscreencanvasTypesPackage: source.build.offscreencanvasTypesPackage } : {}),
+        command: source.build.typescriptPackage
+          ? `node node_modules/${source.build.typescriptPackage.alias}/bin/tsc -p ${source.build.tsconfig}`
+          : `npx --yes --package typescript@${source.build.typescript} tsc -p ${source.build.tsconfig}`,
         ...(source.patch ? {
           upstreamArtifacts: Object.fromEntries(Object.entries(source.buildArtifacts).map(([artifact, hashes]) => [artifact, hashes.upstreamSha256])),
           patchedArtifacts: Object.fromEntries(Object.entries(source.buildArtifacts).map(([artifact, hashes]) => [artifact, hashes.patchedSha256])),

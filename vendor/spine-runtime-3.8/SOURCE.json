@@ -4,14 +4,30 @@
   "commit": "8b4844bd4b193ba9e54487ed397a777993cbad56",
   "sourcePath": "spine-ts",
   "sourceArchiveSha256": "a31be4f37fb5ffa9b88822c38889efa406fb2201046592b8fdcb6d22925db9a4",
+  "sourceArchiveCompression": "gzip",
+  "sourceArchiveFileSha256": "258c42722ae77b0e115a52c0d5dde05671d513cc3cad257dd453097e9373e693",
   "patch": {
     "path": "vendor/spine-runtime-3.8/patches/allow-3.8.75.patch",
     "sha256": "3218fce4eef0781e1814b38842806d3d7b3d249615b8af652ec8e356af88d394"
   },
   "build": {
     "typescript": "3.9.10",
+    "typescriptPackage": {
+      "alias": "typescript-3.9",
+      "package": "typescript",
+      "version": "3.9.10",
+      "url": "https://registry.npmjs.org/typescript/-/typescript-3.9.10.tgz",
+      "integrity": "sha512-w6fIxVE/H1PkLKcCPsFqKE7Kv7QUwhU8qQY2MueZXWx5cPZdwFupLgKK3vntcK98BtNHZtAF4LA/yl2a7k8R6Q=="
+    },
     "offscreencanvasTypes": "2019.7.3",
-    "command": "npx --yes --package typescript@3.9.10 tsc -p tsconfig.webgl.json",
+    "offscreencanvasTypesPackage": {
+      "alias": "offscreencanvas-types-2019",
+      "package": "@types/offscreencanvas",
+      "version": "2019.7.3",
+      "url": "https://registry.npmjs.org/@types/offscreencanvas/-/offscreencanvas-2019.7.3.tgz",
+      "integrity": "sha512-ieXiYmgSRXUDeOntE1InxjWyvEelZGP63M+cGuquuRLuIKKT1osnkXjxev9B7d1nXSug5vpunx+gNlbVxMlC9A=="
+    },
+    "command": "node node_modules/typescript-3.9/bin/tsc -p tsconfig.webgl.json",
     "upstreamArtifacts": {
       "spine-webgl.js": "46fa3cc7d59ccbd81f69f2e04313092243133d3e32e6bca953d63aefdcbdafa3",
       "spine-webgl.d.ts": "da9d140cf744dbb339043c26e3c1b629dc3e3e3b8ba6a20cd29c4d2935ac9047",

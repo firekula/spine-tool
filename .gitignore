@@ -5,3 +5,4 @@ dist/
 dist-offline/
 *.zip
 *.tar.gz
+!vendor/source/spine-runtimes-3.8-8b4844bd4b193ba9e54487ed397a777993cbad56.tar.gz
