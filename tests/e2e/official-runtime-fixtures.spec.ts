@@ -28,6 +28,18 @@ async function importOfficialFixture(
   }
 }
 
+async function canvasHasNonTransparentPixel(page: Parameters<typeof collectPageErrors>[0]): Promise<boolean> {
+  return page.getByLabel("Spine 动画画布").evaluate(async (canvas) => {
+    await new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+    const target = canvas as HTMLCanvasElement;
+    const gl = target.getContext("webgl");
+    if (!gl || target.width === 0 || target.height === 0) return false;
+    const pixels = new Uint8Array(target.width * target.height * 4);
+    gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    return pixels.some((value, index) => index % 4 === 3 && value > 0);
+  });
+}
+
 for (const version of versions) {
   const kinds = version === "3.5" || version === "3.6" || version === "3.7"
     ? ["json"] as const
@@ -51,6 +63,13 @@ for (const version of versions) {
       await expect(page.getByRole("status").first()).toContainText(`Spine ${version} · 预览已就绪`);
       await expect(page.getByRole("region", { name: "Spine 预览交互区域" })).toBeVisible();
       await expect(page.getByRole("combobox", { name: "Runtime 版本" })).toBeHidden();
+      if (version === "4.3") {
+        await expect(page.getByText("Spine 预发布版本兼容风险")).toBeVisible();
+        await expect(page.getByText("SPINE_PRERELEASE_COMPATIBILITY")).toBeVisible();
+        await expect(page.getByText(/可尝试加载，但不保证兼容/)).toBeVisible();
+        await page.getByRole("button", { name: "适配画面" }).click();
+        await expect.poll(() => canvasHasNonTransparentPixel(page)).toBe(true);
+      }
       if (version === "3.5" || version === "3.6" || version === "3.7") {
         await page.getByRole("button", { name: "适配画面" }).click();
         await expect(page.getByRole("region", { name: "动画列表" }).getByRole("button", { name: "idle" })).toBeVisible();
@@ -60,15 +79,7 @@ for (const version of versions) {
         const expectedSlot = version === "3.5" ? "rear_upper_arm" : "rear-upper-arm";
         await expect(page.getByRole("region", { name: "插槽列表" }).getByRole("checkbox", { name: expectedSlot })).toBeVisible();
         await expect(page.getByText("有效样本").locator("xpath=following-sibling::dd")).not.toHaveText("0");
-        await expect.poll(() => page.getByLabel("Spine 动画画布").evaluate(async (canvas) => {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          const target = canvas as HTMLCanvasElement;
-          const gl = target.getContext("webgl");
-          if (!gl || target.width === 0 || target.height === 0) return false;
-          const pixels = new Uint8Array(target.width * target.height * 4);
-          gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-          return pixels.some((value, index) => index % 4 === 3 && value > 0);
-        })).toBe(true);
+        await expect.poll(() => canvasHasNonTransparentPixel(page)).toBe(true);
         const premultipliedBlendWasUsed = await page.evaluate(() => {
           const gl = document.querySelector<HTMLCanvasElement>('canvas[aria-label="Spine 动画画布"]')?.getContext("webgl");
           const calls = (window as unknown as { __spineBlendCalls: number[][] }).__spineBlendCalls;

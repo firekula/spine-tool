@@ -23,7 +23,7 @@ export const capabilities = {
   skeletonBinary: true,
 } as const;
 
-const adapter = {
+const adapter = Object.freeze({
   capabilities,
   atlasMode: "page-setter",
   constructors: runtime,
@@ -53,7 +53,10 @@ const adapter = {
   },
   updateSkeleton: (skeleton: runtime.Skeleton, delta: number) => skeleton.update(delta),
   updateWorldTransform: (skeleton: runtime.Skeleton) => skeleton.updateWorldTransform(runtime.Physics.update),
-} as unknown as RuntimeAdapter;
+}) as unknown as RuntimeAdapter;
+
+/** Read-only adapter surface for integration verification without exposing mutable Runtime state. */
+export const runtimeAdapter: Readonly<RuntimeAdapter> = adapter;
 
 export function createBridge() {
   return createRuntimeBridge(version, adapter);

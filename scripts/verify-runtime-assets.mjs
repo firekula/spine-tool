@@ -313,6 +313,7 @@ const npmCorePaths = new Map();
 for (const version of supportedVersions) {
   const source = sourceManifest.runtimes[version];
   assert.match(source.url, /^https:\/\/(github\.com\/EsotericSoftware\/spine-runtimes|registry\.npmjs\.org\/@esotericsoftware\/spine-webgl)/, `${version} 不是官方来源 URL`);
+  assert.equal(await pathExists(source.entry), true, `${version} Runtime entry 不存在：${source.entry}`);
   await validateArchive(version, source);
 
   if (source.kind === "git-vendor") {
@@ -436,18 +437,15 @@ for (const version of supportedVersions) {
   assert.ok(documentation.includes(source.archiveSha256), `文档缺少 ${version} tarball SHA-256`);
   assert.ok(documentation.includes(source.integrity), `文档缺少 ${version} 完整 SRI`);
 
-  if (await pathExists(source.entry)) {
-    runtimeDetails.set(version, {
-      ...source,
-      moduleSource: `/${packagePath}/`,
-      corePath: `/${corePath}/`,
-    });
-    console.log(`${version}: 官方 npm 来源、安装产物与 core 已验证`);
-  } else {
-    console.log(`${version}: 官方 npm 来源与安装产物已验证（Runtime 待集成）`);
-  }
+  runtimeDetails.set(version, {
+    ...source,
+    moduleSource: `/${packagePath}/`,
+    corePath: `/${corePath}/`,
+  });
+  console.log(`${version}: 官方 npm 来源、安装产物与 core 已验证`);
 }
 
+assert.equal(runtimeDetails.size, supportedVersions.length, "八个 Spine Runtime entry 必须全部通过来源验证");
 assert.equal(coreDirectories.size, 4, "4.x Runtime 必须解析到四个独立 core package");
 assert.equal(
   await sha256("public/licenses/SPINE-RUNTIMES-LICENSE.txt"),
@@ -471,10 +469,21 @@ const buildResult = await build({
 });
 const outputs = Array.isArray(buildResult) ? buildResult : [buildResult];
 const chunks = outputs.flatMap((output) => output.output).filter((item) => item.type === "chunk");
+const expectedRuntimeEntries = new Set(
+  [...runtimeDetails.values()].map((runtime) => `/${runtime.entry}`),
+);
+const runtimeChunks = chunks.filter((candidate) => {
+  const facade = candidate.facadeModuleId?.split(sep).join("/");
+  return facade && [...expectedRuntimeEntries].some((entry) => facade.endsWith(entry));
+});
+assert.equal(runtimeChunks.length, supportedVersions.length, "必须恰好生成八个 Spine Runtime entry chunk");
+const verifiedChunks = new Set();
 
 for (const [version, runtime] of runtimeDetails) {
-  const chunk = chunks.find((candidate) => candidate.facadeModuleId?.split(sep).join("/").endsWith(`/${runtime.entry}`));
+  const chunk = runtimeChunks.find((candidate) => candidate.facadeModuleId?.split(sep).join("/").endsWith(`/${runtime.entry}`));
   assert.ok(chunk, `缺少 Spine ${version} 动态 Runtime chunk`);
+  assert.equal(verifiedChunks.has(chunk.fileName), false, `${version} 与其他版本共享了 Runtime entry chunk`);
+  verifiedChunks.add(chunk.fileName);
   const modules = Object.keys(chunk.modules).map((id) => id.split(sep).join("/"));
   assert.ok(modules.some((id) => id.includes(runtime.moduleSource)), `${version} chunk 缺少自身 Runtime 来源`);
   if (runtime.kind === "npm") {
@@ -498,8 +507,11 @@ for (const [version, runtime] of runtimeDetails) {
   console.log(`${version}: ${chunk.fileName}（${modules.length} modules，隔离 chunk）`);
 }
 
-console.log(`已验证 ${supportedVersions.length} 条 Spine Runtime 固定来源`);
-console.log(`已验证 ${runtimeDetails.size} 个隔离 Spine Runtime chunk`);
 if (fastVerification) {
+  console.log(`快速检查 ${supportedVersions.length} 条 Spine Runtime 固定来源（未完成严格重建）`);
+  console.log(`快速检查 ${verifiedChunks.size} 个隔离 Spine Runtime chunk（未完成严格重建）`);
   console.log("快速验证完成：未重建 3.8 Runtime；不得用于 CI 或发布门禁");
+} else {
+  console.log(`已验证 ${supportedVersions.length} 条 Spine Runtime 固定来源`);
+  console.log(`已验证 ${verifiedChunks.size} 个隔离 Spine Runtime chunk`);
 }

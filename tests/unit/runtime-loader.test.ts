@@ -37,6 +37,7 @@ const EXPECTED_SOURCES = {
 } as const;
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function verifierFixtureWithPatch(patch: string): { directory: string; manifest: string } {
   const directory = mkdtempSync(join(tmpdir(), "spine-runtime-patch-fixture-"));
@@ -194,6 +195,57 @@ describe("Runtime 资产验证", () => {
 
     expect(output).toContain("快速验证完成：未重建 3.8 Runtime；不得用于 CI 或发布门禁");
     expect(output).not.toContain("3.8: 已从固定归档与 patch 重建 Runtime");
+    expect(output).not.toContain("已验证 8 条 Spine Runtime 固定来源");
+    expect(output).not.toContain("已验证 8 个隔离 Spine Runtime chunk");
+  });
+
+  it.each([
+    { label: "严格", args: [] },
+    { label: "快速", args: ["--fast"] },
+  ])("$label verifier 在已集成的 4.3 entry 缺失时 fail-closed", ({ args }) => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-missing-entry-"));
+    const fixtureManifest = join(fixtureDirectory, "runtime-sources.json");
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, "scripts/runtime-sources.json"), "utf8"));
+      manifest.runtimes["4.3"].entry = join(fixtureDirectory, "missing-runtime-4_3.ts");
+      writeFileSync(fixtureManifest, JSON.stringify(manifest));
+
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs"), ...args],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixtureManifest },
+          stdio: "pipe",
+        },
+      )).toThrow(/4\.3 Runtime entry 不存在/);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("prepackage:offline 继承严格 verifier 的八 entry 门禁", () => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-prepackage-missing-entry-"));
+    const fixtureManifest = join(fixtureDirectory, "runtime-sources.json");
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, "scripts/runtime-sources.json"), "utf8"));
+      manifest.runtimes["4.3"].entry = join(fixtureDirectory, "missing-runtime-4_3.ts");
+      writeFileSync(fixtureManifest, JSON.stringify(manifest));
+
+      expect(() => execFileSync(
+        npmCommand,
+        ["run", "prepackage:offline", "--silent"],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixtureManifest },
+          stdio: "pipe",
+        },
+      )).toThrow(/4\.3 Runtime entry 不存在/);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
   });
 
   it("默认严格验证在固定 3.8 archive 缺失时失败", () => {

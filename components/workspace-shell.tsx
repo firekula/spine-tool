@@ -353,6 +353,20 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         });
       }
 
+      if (nextPrepared.detected.compatibility === "prerelease") {
+        dispatch({
+          type: "REPORT_ISSUE",
+          issue: {
+            code: "SPINE_PRERELEASE_COMPATIBILITY",
+            severity: "warning",
+            subject: `Spine ${nextPrepared.detected.raw}`,
+            details: [
+              `已自动选择 Spine ${nextPrepared.detected.majorMinor} Runtime；文件仍会按正常流程尝试加载。`,
+            ],
+          },
+        });
+      }
+
       if (bundle.unusedTextures.length > 0) {
         dispatch({
           type: "REPORT_ISSUE",

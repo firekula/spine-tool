@@ -31,9 +31,9 @@ const metadata: SkeletonMetadata = {
   regionAttachments: [],
 };
 
-function fakeBridge(): SpineRuntimeBridge {
+function fakeBridge(version: "4.2" | "4.3" = "4.2"): SpineRuntimeBridge {
   return {
-    version: "4.2",
+    version,
     load: vi.fn(async () => metadata),
     play: vi.fn(),
     setLoop: vi.fn(),
@@ -208,6 +208,7 @@ describe("WorkspaceShell import integration", () => {
 
     await screen.findByText("Spine 3.8.75 尽力兼容");
     expect(screen.getByText("SPINE_3_8_75_COMPATIBILITY")).toBeTruthy();
+    expect(screen.queryByText("SPINE_PRERELEASE_COMPATIBILITY")).toBeNull();
     expect(screen.getByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" })).toBeTruthy();
     expect(screen.queryByText("手动选择 Runtime")).toBeNull();
     expect(mocks.createRuntimeSession).not.toHaveBeenCalled();
@@ -220,6 +221,51 @@ describe("WorkspaceShell import integration", () => {
     ));
     await waitFor(() => expect(bridge.load).toHaveBeenCalled());
     expect(screen.getByText("Spine 3.8.75 尽力兼容")).toBeTruthy();
+  });
+
+  it("Spine 4.3 Beta 显示非阻断兼容警告并继续自动加载 4.3 Runtime", async () => {
+    const bundle = importBundle();
+    const bridge = fakeBridge("4.3");
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: {
+        raw: "4.3.75-beta",
+        majorMinor: "4.3",
+        source: "json-field",
+        supported: true,
+        compatibility: "prerelease",
+      },
+      exportResources: {
+        atlas: { pages: [], regions: [] },
+        textures: new Map(),
+        acquire: vi.fn(),
+        release: vi.fn(),
+      },
+    } satisfies PreparedImport);
+    mocks.createRuntimeSession.mockResolvedValue({
+      bridge,
+      input: {
+        atlasText: "atlas",
+        skeleton: { kind: "json", text: "{}" },
+        textureObjectUrls: new Map(),
+      },
+      release: vi.fn(),
+    } satisfies RuntimeSession);
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+
+    await screen.findByText("Spine 预发布版本兼容风险");
+    expect(screen.getByText("SPINE_PRERELEASE_COMPATIBILITY")).toBeTruthy();
+    expect(screen.getByText(/可尝试加载，但不保证兼容/)).toBeTruthy();
+    expect(screen.queryByText("手动选择 Runtime")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" })).toBeNull();
+    await waitFor(() => expect(mocks.createRuntimeSession).toHaveBeenCalledWith(bundle, "4.3"));
+    await waitFor(() => expect(bridge.load).toHaveBeenCalled());
+    expect(screen.getByText("Spine 4.3 · 预览已就绪")).toBeTruthy();
   });
 
   it("Spine 3.8.75 Runtime 失败后保留已准备的 Atlas 导出资源", async () => {
