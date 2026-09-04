@@ -57,7 +57,7 @@ async function preparedWithRealLease(
 ): Promise<PreparedImport> {
   const actual = await vi.importActual<typeof import("@/lib/files/import-workflow")>("@/lib/files/import-workflow");
   return actual.prepareImport(source, {
-    detectVersion: async () => ({ raw: "4.3.0", majorMinor: null, source: "json-field", supported: false }),
+    detectVersion: async () => ({ raw: "3.4.0", majorMinor: null, source: "json-field", supported: false, compatibility: null }),
     decodeTexture: async () => bitmap,
   });
 }

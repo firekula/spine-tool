@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectSpineVersion } from "@/lib/spine/version";
+import { classifySpineVersion, detectSpineVersion } from "@/lib/spine/version";
 
 function file(name: string, contents: string): File {
   return new File([contents], name, { type: "application/octet-stream" });
@@ -41,24 +41,34 @@ describe("detectSpineVersion", () => {
       .resolves.toMatchObject({ raw: "3.8.99", majorMinor: "3.8", source: "skel-header", supported: true });
   });
 
-  it.each(["3.8.99", "4.0.1", "4.1.24", "4.2.120"])("仅将 %s 标记为受支持的版本", async (version) => {
-    await expect(detectSpineVersion(binaryFile("hero.skel", skelHeader(version))))
-      .resolves.toMatchObject({ majorMinor: version.slice(0, 3), supported: true });
+  it.each([
+    ["3.5.51", "3.5"], ["3.6.53", "3.6"], ["3.7.94", "3.7"],
+    ["3.8.75", "3.8"], ["3.8.99", "3.8"], ["4.0.64", "4.0"],
+    ["4.1.24", "4.1"], ["4.2.120", "4.2"], ["4.3.9", "4.3"],
+  ])("将 %s 路由到 %s", async (raw, majorMinor) => {
+    await expect(detectSpineVersion(file("hero.json", JSON.stringify({ skeleton: { spine: raw } }))))
+      .resolves.toMatchObject({ raw, majorMinor, source: "json-field", supported: true });
   });
 
-  it.each(["3.7.94", "4.3.1"])("将范围外 JSON 版本 %s 保留为未支持", async (version) => {
+  it("标记 3.8.75 特殊兼容与 Beta 风险", () => {
+    expect(classifySpineVersion("3.8.75", "json-field").compatibility).toBe("spine-3.8.75");
+    expect(classifySpineVersion("4.3.0-beta", "json-field").compatibility).toBe("prerelease");
+  });
+
+  it("将范围外 JSON 版本保留为未支持", async () => {
+    const version = "3.4.1";
     await expect(detectSpineVersion(file("hero.json", JSON.stringify({ skeleton: { spine: version } }))))
       .resolves.toMatchObject({ raw: version, majorMinor: null, source: "json-field", supported: false });
   });
 
   it("在 JSON 缺少 skeleton.spine 时返回未知结构化结果", async () => {
     await expect(detectSpineVersion(file("hero.json", '{"skeleton":{}}')))
-      .resolves.toEqual({ raw: null, majorMinor: null, source: "unknown", supported: false });
+      .resolves.toEqual({ raw: null, majorMinor: null, source: "unknown", supported: false, compatibility: null });
   });
 
   it("为被截断的 SKEL 头返回未知结构化结果", async () => {
     await expect(detectSpineVersion(binaryFile("hero.skel", new Uint8Array(encodeString("hash")))))
-      .resolves.toEqual({ raw: null, majorMinor: null, source: "unknown", supported: false });
+      .resolves.toEqual({ raw: null, majorMinor: null, source: "unknown", supported: false, compatibility: null });
   });
 
   it("在超长 varint 后以受控 ASCII 扫描恢复版本", async () => {
@@ -76,6 +86,6 @@ describe("detectSpineVersion", () => {
     bytes.set(new TextEncoder().encode("4.1.24"), 270);
 
     await expect(detectSpineVersion(binaryFile("hero.skel", bytes)))
-      .resolves.toEqual({ raw: null, majorMinor: null, source: "unknown", supported: false });
+      .resolves.toEqual({ raw: null, majorMinor: null, source: "unknown", supported: false, compatibility: null });
   });
 });

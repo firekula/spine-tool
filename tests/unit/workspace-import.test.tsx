@@ -90,7 +90,7 @@ describe("WorkspaceShell import integration", () => {
     const bridge = fakeBridge();
     const prepared = {
       bundle,
-      detected: { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true },
+      detected: { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true, compatibility: "stable" },
       exportResources: {
         atlas: { pages: [{ name: "page.png", width: 1, height: 1, custom: {} }], regions: [] },
         textures: new Map([["page.png", {} as ImageBitmap]]),
@@ -133,7 +133,7 @@ describe("WorkspaceShell import integration", () => {
     mocks.classifyImport.mockResolvedValueOnce(bundle);
     mocks.prepareImport.mockResolvedValueOnce({
       bundle,
-      detected: { raw: "4.3.0", majorMinor: null, source: "json-field", supported: false },
+      detected: { raw: "3.4.0", majorMinor: null, source: "json-field", supported: false, compatibility: null },
       exportResources: {
         atlas: { pages: [{ name: "page.png", width: 1, height: 1, custom: {} }], regions: [] },
         textures: new Map([['page.png', {} as ImageBitmap]]),
@@ -172,7 +172,7 @@ describe("WorkspaceShell import integration", () => {
     view.unmount();
     resolvePrepared({
       bundle,
-      detected: { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true },
+      detected: { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true, compatibility: "stable" },
       exportResources: {
         atlas: { pages: [], regions: [] },
         textures: new Map(),
@@ -194,7 +194,7 @@ describe("WorkspaceShell import integration", () => {
     mocks.classifyImport.mockResolvedValueOnce(bundle);
     mocks.prepareImport.mockResolvedValueOnce({
       bundle,
-      detected: { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true },
+      detected: { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true, compatibility: "stable" },
       exportResources: {
         atlas: { pages: [], regions: [] },
         textures: new Map(),

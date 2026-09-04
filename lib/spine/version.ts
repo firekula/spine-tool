@@ -1,14 +1,20 @@
-export type SupportedSpineVersion = "3.8" | "4.0" | "4.1" | "4.2";
+import {
+  isSupportedSpineVersion,
+  type RuntimeCompatibility,
+  type SupportedSpineVersion,
+} from "./runtime-registry";
+
+export type { RuntimeCompatibility, SupportedSpineVersion } from "./runtime-registry";
 
 export interface DetectedSpineVersion {
   raw: string | null;
   majorMinor: SupportedSpineVersion | null;
   source: "json-field" | "skel-header" | "ascii-fallback" | "unknown";
   supported: boolean;
+  compatibility: RuntimeCompatibility | null;
 }
 
 const SKEL_HEADER_BYTES = 256;
-const SUPPORTED_VERSIONS = new Set<SupportedSpineVersion>(["3.8", "4.0", "4.1", "4.2"]);
 
 interface DecodedString {
   value: string | null;
@@ -16,17 +22,27 @@ interface DecodedString {
 }
 
 function unknownVersion(): DetectedSpineVersion {
-  return { raw: null, majorMinor: null, source: "unknown", supported: false };
+  return { raw: null, majorMinor: null, source: "unknown", supported: false, compatibility: null };
 }
 
-function versionResult(raw: string, source: Exclude<DetectedSpineVersion["source"], "unknown">): DetectedSpineVersion {
+export function classifySpineVersion(
+  raw: string,
+  source: Exclude<DetectedSpineVersion["source"], "unknown">,
+): DetectedSpineVersion {
   const match = raw.match(/^(\d+)\.(\d+)(?:\.|$)/);
   const candidate = match ? `${match[1]}.${match[2]}` : null;
-  const majorMinor = candidate && SUPPORTED_VERSIONS.has(candidate as SupportedSpineVersion)
-    ? candidate as SupportedSpineVersion
+  const majorMinor = candidate && isSupportedSpineVersion(candidate)
+    ? candidate
     : null;
+  const compatibility = majorMinor === null
+    ? null
+    : /^\d+\.\d+(?:\.\d+)?-[0-9A-Za-z.-]+$/.test(raw)
+      ? "prerelease"
+      : raw === "3.8.75"
+        ? "spine-3.8.75"
+        : "stable";
 
-  return { raw, majorMinor, source, supported: majorMinor !== null };
+  return { raw, majorMinor, source, supported: majorMinor !== null, compatibility };
 }
 
 function isJsonFile(file: File): boolean {
@@ -92,7 +108,7 @@ async function detectJsonVersion(file: File): Promise<DetectedSpineVersion> {
       && "spine" in parsed.skeleton
       && typeof parsed.skeleton.spine === "string"
     ) {
-      return versionResult(parsed.skeleton.spine, "json-field");
+      return classifySpineVersion(parsed.skeleton.spine, "json-field");
     }
   } catch {
     // The detector is used during import validation; invalid JSON is simply
@@ -106,10 +122,10 @@ async function detectSkelVersion(file: File): Promise<DetectedSpineVersion> {
   try {
     const bytes = new Uint8Array(await file.slice(0, SKEL_HEADER_BYTES).arrayBuffer());
     const headerVersion = readSkelHeaderVersion(bytes);
-    if (headerVersion !== null) return versionResult(headerVersion, "skel-header");
+    if (headerVersion !== null) return classifySpineVersion(headerVersion, "skel-header");
 
     const asciiVersion = findAsciiVersion(bytes);
-    if (asciiVersion !== null) return versionResult(asciiVersion, "ascii-fallback");
+    if (asciiVersion !== null) return classifySpineVersion(asciiVersion, "ascii-fallback");
   } catch {
     // Return a structured unknown result when File reading fails.
   }
@@ -117,7 +133,7 @@ async function detectSkelVersion(file: File): Promise<DetectedSpineVersion> {
   return unknownVersion();
 }
 
-/** Detects a Spine 3.8--4.2 skeleton version without loading a SKEL body. */
+/** Detects a Spine 3.5--4.3 skeleton version without loading a SKEL body. */
 export async function detectSpineVersion(file: File): Promise<DetectedSpineVersion> {
   return isJsonFile(file) ? detectJsonVersion(file) : detectSkelVersion(file);
 }

@@ -57,6 +57,10 @@ describe("loadRuntimeModule", () => {
 
     expect(new Set(modules.map((module) => module.runtimeConstructors.Skeleton)).size).toBe(4);
   });
+
+  it.each(["3.5", "3.6", "3.7", "4.3"] as const)("为尚未安装的 %s Runtime 返回明确错误", async (version) => {
+    await expect(loadRuntimeModule(version)).rejects.toThrow(`Spine ${version} 对应 Runtime 尚未安装`);
+  });
 });
 
 describe("Runtime 资产验证", () => {

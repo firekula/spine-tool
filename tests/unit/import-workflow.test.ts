@@ -68,7 +68,7 @@ describe("import workflow resources", () => {
       },
       detectVersion: async () => {
         order.push("version");
-        return { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true };
+        return { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true, compatibility: "stable" };
       },
       decodeTexture: async () => {
         order.push("bitmap");

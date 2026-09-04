@@ -1,4 +1,4 @@
-import type { SupportedSpineVersion } from "./version";
+import type { SupportedSpineVersion } from "./runtime-registry";
 
 export type RuntimeSkeletonInput =
   | { kind: "json"; text: string }
