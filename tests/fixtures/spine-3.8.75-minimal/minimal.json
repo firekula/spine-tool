@@ -1,0 +1,13 @@
+{
+  "skeleton": {
+    "hash": "synthetic-minimal-3.8.75",
+    "spine": "3.8.75",
+    "width": 0,
+    "height": 0
+  },
+  "bones": [
+    {
+      "name": "root"
+    }
+  ]
+}

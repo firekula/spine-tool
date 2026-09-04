@@ -52,11 +52,11 @@ interface AlphaModeFieldsProps {
 function AlphaModeFields({ version, value, onChange }: AlphaModeFieldsProps) {
   return (
     <fieldset className="alpha-mode-picker">
-      <legend>Spine {version} 纹理 Alpha 模式</legend>
+      <legend>Spine 3.x 纹理 Alpha 模式（当前 {version}）</legend>
       <label>
         <input
           type="radio"
-          name="spine-38-alpha-mode"
+          name="spine-3x-alpha-mode"
           value="premultiplied"
           checked={value === "premultiplied"}
           onChange={() => onChange("premultiplied")}
@@ -66,7 +66,7 @@ function AlphaModeFields({ version, value, onChange }: AlphaModeFieldsProps) {
       <label>
         <input
           type="radio"
-          name="spine-38-alpha-mode"
+          name="spine-3x-alpha-mode"
           value="straight"
           checked={value === "straight"}
           onChange={() => onChange("straight")}
@@ -339,6 +339,20 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
       replacePrepared(nextPrepared);
       setAlphaMode(suggestLegacyAlphaMode(bundle));
 
+      if (nextPrepared.detected.compatibility === "spine-3.8.75") {
+        dispatch({
+          type: "REPORT_ISSUE",
+          issue: {
+            code: "SPINE_3_8_75_COMPATIBILITY",
+            severity: "warning",
+            subject: `Spine ${nextPrepared.detected.raw}`,
+            details: [
+              "已自动选择 Spine 3.8 Runtime；不会改写 JSON 或 SKEL 中的版本及其他数据。",
+            ],
+          },
+        });
+      }
+
       if (bundle.unusedTextures.length > 0) {
         dispatch({
           type: "REPORT_ISSUE",
@@ -531,7 +545,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
                   setAlphaModeVersion(null);
                   void startRuntime(prepared.bundle, version, alphaMode);
                 }}>
-                  <h3>确认 Spine {alphaModeVersion} Alpha 模式</h3>
+                  <h3>Spine 3.x 纹理 Alpha 模式</h3>
                   <p>Spine {alphaModeVersion} Atlas 可能不含 pma 字段。文件名仅用于建议默认值；请按纹理实际导出方式确认。</p>
                   <AlphaModeFields version={alphaModeVersion} value={alphaMode} onChange={setAlphaMode} />
                   <button type="submit" className="button">确认 Alpha 模式并加载预览</button>

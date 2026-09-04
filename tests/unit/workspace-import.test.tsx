@@ -159,7 +159,7 @@ describe("WorkspaceShell import integration", () => {
       target: { files: [new File(["selection"], "selection.atlas")] },
     });
 
-    await screen.findByText("确认 Spine 3.5 Alpha 模式");
+    await screen.findByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" });
     expect(mocks.createRuntimeSession).not.toHaveBeenCalled();
     expect(screen.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toHaveProperty("checked", true);
     await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式并加载预览" }));
@@ -168,6 +168,98 @@ describe("WorkspaceShell import integration", () => {
       "3.5",
       { alphaMode: "premultiplied" },
     ));
+  });
+
+  it("Spine 3.8.75 显示尽力兼容警告，仍进入 Alpha 确认并自动加载 3.8 Runtime", async () => {
+    const bundle = importBundle();
+    const bridge = fakeBridge();
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: {
+        raw: "3.8.75",
+        majorMinor: "3.8",
+        source: "json-field",
+        supported: true,
+        compatibility: "spine-3.8.75",
+      },
+      exportResources: {
+        atlas: { pages: [], regions: [] },
+        textures: new Map(),
+        acquire: vi.fn(),
+        release: vi.fn(),
+      },
+    } satisfies PreparedImport);
+    mocks.createRuntimeSession.mockResolvedValue({
+      bridge,
+      input: {
+        atlasText: "atlas",
+        skeleton: { kind: "json", text: "{}" },
+        textureObjectUrls: new Map(),
+        alphaMode: "straight",
+      },
+      release: vi.fn(),
+    } satisfies RuntimeSession);
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+
+    await screen.findByText("Spine 3.8.75 尽力兼容");
+    expect(screen.getByText("SPINE_3_8_75_COMPATIBILITY")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" })).toBeTruthy();
+    expect(screen.queryByText("手动选择 Runtime")).toBeNull();
+    expect(mocks.createRuntimeSession).not.toHaveBeenCalled();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式并加载预览" }));
+    await waitFor(() => expect(mocks.createRuntimeSession).toHaveBeenCalledWith(
+      bundle,
+      "3.8",
+      { alphaMode: "straight" },
+    ));
+    await waitFor(() => expect(bridge.load).toHaveBeenCalled());
+    expect(screen.getByText("Spine 3.8.75 尽力兼容")).toBeTruthy();
+  });
+
+  it("Spine 3.8.75 Runtime 失败后保留已准备的 Atlas 导出资源", async () => {
+    const bundle = importBundle();
+    const exportRelease = vi.fn();
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: {
+        raw: "3.8.75",
+        majorMinor: "3.8",
+        source: "json-field",
+        supported: true,
+        compatibility: "spine-3.8.75",
+      },
+      exportResources: {
+        atlas: {
+          pages: [{ name: "page.png", width: 1, height: 1, custom: {} }],
+          regions: [],
+        },
+        textures: new Map([["page.png", {} as ImageBitmap]]),
+        acquire: vi.fn(),
+        release: exportRelease,
+      },
+    } satisfies PreparedImport);
+    mocks.createRuntimeSession.mockRejectedValue(new Error("synthetic 3.8.75 parse failure"));
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+
+    await screen.findByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式并加载预览" }));
+
+    await screen.findByText("预览不可用 · Atlas 仍可导出");
+    expect(screen.getByText("Spine 3.8.75 尽力兼容")).toBeTruthy();
+    expect(screen.getByText("Atlas 已就绪，预览尚未可用")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false);
+    expect(exportRelease).not.toHaveBeenCalled();
   });
 
   it("Atlas 回退状态下再次选择无效文件也会释放上一批导入资源", async () => {

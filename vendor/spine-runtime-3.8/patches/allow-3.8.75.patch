@@ -1,0 +1,24 @@
+diff --git a/spine-ts/core/src/SkeletonBinary.ts b/spine-ts/core/src/SkeletonBinary.ts
+--- a/spine-ts/core/src/SkeletonBinary.ts
++++ b/spine-ts/core/src/SkeletonBinary.ts
+@@ -81,8 +81,6 @@ module spine {
+ 
+ 			skeletonData.hash = input.readString();
+ 			skeletonData.version = input.readString();
+-			if ("3.8.75" == skeletonData.version)
+-					throw new Error("Unsupported skeleton data, please export with a newer version of Spine.");
+ 			skeletonData.x = input.readFloat();
+ 			skeletonData.y = input.readFloat();
+ 			skeletonData.width = input.readFloat();
+diff --git a/spine-ts/core/src/SkeletonJson.ts b/spine-ts/core/src/SkeletonJson.ts
+--- a/spine-ts/core/src/SkeletonJson.ts
++++ b/spine-ts/core/src/SkeletonJson.ts
+@@ -58,8 +58,6 @@ module spine {
+ 			if (skeletonMap != null) {
+ 				skeletonData.hash = skeletonMap.hash;
+ 				skeletonData.version = skeletonMap.spine;
+-				if ("3.8.75" == skeletonData.version)
+-					throw new Error("Unsupported skeleton data, please export with a newer version of Spine.");
+ 				skeletonData.x = skeletonMap.x;
+ 				skeletonData.y = skeletonMap.y;
+ 				skeletonData.width = skeletonMap.width;

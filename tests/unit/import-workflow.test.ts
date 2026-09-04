@@ -45,9 +45,9 @@ function bridge(): SpineRuntimeBridge {
 }
 
 describe("import workflow resources", () => {
-  it("把 Spine 3.8 的明确 Alpha 选择写入 Runtime load input", async () => {
+  it.each(["3.5", "3.6", "3.7", "3.8"] as const)("把 Spine %s 的明确 Alpha 选择写入 Runtime load input", async (version) => {
     const runtimeBridge = bridge();
-    const session = await createRuntimeSession(bundle(), "3.8", {
+    const session = await createRuntimeSession(bundle(), version, {
       alphaMode: "premultiplied",
       loadModule: async () => ({ createBridge: () => runtimeBridge } as SpineRuntimeModule),
       createObjectUrl: () => "blob:pma",
@@ -55,6 +55,19 @@ describe("import workflow resources", () => {
     });
 
     expect(session.input.alphaMode).toBe("premultiplied");
+    session.release();
+  });
+
+  it.each(["4.0", "4.1", "4.2", "4.3"] as const)("Spine %s 不接受显式 Alpha 选择覆盖 Atlas pma", async (version) => {
+    const runtimeBridge = bridge();
+    const session = await createRuntimeSession(bundle(), version, {
+      alphaMode: "premultiplied",
+      loadModule: async () => ({ createBridge: () => runtimeBridge } as SpineRuntimeModule),
+      createObjectUrl: () => "blob:pma",
+      revokeObjectUrl: vi.fn(),
+    });
+
+    expect(session.input.alphaMode).toBeUndefined();
     session.release();
   });
 

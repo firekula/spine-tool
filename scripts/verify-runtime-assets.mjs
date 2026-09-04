@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { build } from "vite";
 
+const execFileAsync = promisify(execFile);
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const normalizedRoot = repositoryRoot.split(sep).join("/");
 const supportedVersions = ["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3"];
+const rebuildArchive = process.env.SPINE_RUNTIME_REBUILD_ARCHIVE;
+const rebuildVersion = process.env.SPINE_RUNTIME_REBUILD_VERSION;
 const javascriptBoundary = "\n\n// ESM boundary added by this project; the runtime above is the official build.\nexport { spine };\n";
 const declarationBoundary = "\ndeclare const spineRuntime: typeof spine;\nexport { spineRuntime as spine };\n";
 
@@ -33,6 +39,82 @@ function sha256Contents(contents) {
 
 async function sha256(path) {
   return sha256Contents(await readFile(resolve(repositoryRoot, path)));
+}
+
+async function verifyLegacyPatch(version, source, provenance) {
+  if (version === "3.8") assert.ok(source.patch, "3.8 Runtime 必须声明受控兼容 patch");
+  if (!source.patch) {
+    assert.equal(provenance.patch, undefined, `${version} SOURCE.json 声明了未固定的 patch`);
+    return;
+  }
+
+  assert.match(source.patch.sha256, /^[0-9a-f]{64}$/, `${version} patch SHA-256 未固定`);
+  assert.equal(await sha256(source.patch.path), source.patch.sha256, `${version} Runtime patch SHA-256 不匹配`);
+  assert.deepEqual(provenance.patch, source.patch, `${version} SOURCE.json patch 记录不匹配`);
+
+  for (const [artifact, hashes] of Object.entries(source.buildArtifacts)) {
+    assert.match(hashes.upstreamSha256 ?? "", /^[0-9a-f]{64}$/, `${version} ${artifact} 必须分别固定上游与补丁构建 SHA-256`);
+    assert.match(hashes.patchedSha256 ?? "", /^[0-9a-f]{64}$/, `${version} ${artifact} 必须分别固定上游与补丁构建 SHA-256`);
+  }
+  assert.deepEqual(
+    provenance.build.upstreamArtifacts,
+    Object.fromEntries(Object.entries(source.buildArtifacts).map(([artifact, hashes]) => [artifact, hashes.upstreamSha256])),
+    `${version} SOURCE.json 上游构建 hash 记录不匹配`,
+  );
+  assert.deepEqual(
+    provenance.build.patchedArtifacts,
+    Object.fromEntries(Object.entries(source.buildArtifacts).map(([artifact, hashes]) => [artifact, hashes.patchedSha256])),
+    `${version} SOURCE.json 补丁构建 hash 记录不匹配`,
+  );
+
+  if (version === "3.8") {
+    const patch = await readFile(resolve(repositoryRoot, source.patch.path), "utf8");
+    assert.deepEqual(
+      [...patch.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)].map((match) => [match[1], match[2]]),
+      [
+        ["spine-ts/core/src/SkeletonBinary.ts", "spine-ts/core/src/SkeletonBinary.ts"],
+        ["spine-ts/core/src/SkeletonJson.ts", "spine-ts/core/src/SkeletonJson.ts"],
+      ],
+      "3.8 patch 只能修改官方 JSON 与 Binary reader",
+    );
+    const changes = patch.split("\n").filter((line) => (
+      (/^[+-]/.test(line) && !/^(---|\+\+\+)/.test(line))
+    ));
+    assert.deepEqual(changes, [
+      "-\t\t\tif (\"3.8.75\" == skeletonData.version)",
+      "-\t\t\t\t\tthrow new Error(\"Unsupported skeleton data, please export with a newer version of Spine.\");",
+      "-\t\t\t\tif (\"3.8.75\" == skeletonData.version)",
+      "-\t\t\t\t\tthrow new Error(\"Unsupported skeleton data, please export with a newer version of Spine.\");",
+    ], "3.8 patch 只能删除精确 3.8.75 主动拒绝");
+  }
+}
+
+async function verifyRequestedRebuild(version, source) {
+  if (!rebuildArchive && !rebuildVersion) return;
+  if (version !== rebuildVersion) return;
+  assert.equal(source.kind, "git-vendor", `${version} 不是可从 git archive 重建的 legacy Runtime`);
+  assert.equal(sha256Contents(await readFile(resolve(rebuildArchive))), source.archiveSha256, `${version} 重建归档 SHA-256 不匹配`);
+
+  const outputDirectory = await mkdtemp(resolve(tmpdir(), `spine-${version.replace(".", "-")}-rebuild-`));
+  try {
+    await execFileAsync(process.execPath, [
+      resolve(repositoryRoot, "scripts/vendor-legacy-runtime.mjs"),
+      "--version", version,
+      "--commit", source.commit,
+      "--archive", resolve(rebuildArchive),
+      "--output", outputDirectory,
+    ], { cwd: repositoryRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+    for (const artifact of ["spine-webgl.js", "spine-webgl.d.ts", "spine-webgl.js.map", "LICENSE", "SOURCE.json"]) {
+      assert.equal(
+        sha256Contents(await readFile(resolve(outputDirectory, artifact))),
+        await sha256(`${source.vendorDirectory}/${artifact}`),
+        `${version} 重建的 ${artifact} 与提交产物不一致`,
+      );
+    }
+    console.log(`${version}: 已从固定归档与 patch 重建 Runtime`);
+  } finally {
+    await rm(outputDirectory, { recursive: true, force: true });
+  }
 }
 
 async function sha256Tree(path) {
@@ -80,6 +162,8 @@ const documentation = await readFile(resolve(repositoryRoot, "docs/runtime-versi
 
 assert.equal(sourceManifest.schemaVersion, 1, "Runtime 来源清单 schemaVersion 不受支持");
 assert.deepEqual(Object.keys(sourceManifest.runtimes), supportedVersions, "Runtime 来源清单必须精确覆盖八个版本");
+assert.equal(Boolean(rebuildArchive), Boolean(rebuildVersion), "重建验证必须同时提供 SPINE_RUNTIME_REBUILD_VERSION 与 SPINE_RUNTIME_REBUILD_ARCHIVE");
+if (rebuildVersion) assert.ok(supportedVersions.includes(rebuildVersion), `重建验证版本不受支持：${rebuildVersion}`);
 
 const runtimeDetails = new Map();
 const coreDirectories = new Set();
@@ -114,6 +198,7 @@ for (const version of supportedVersions) {
     assert.equal(provenance.commit, source.commit, `${version} SOURCE.json commit 不匹配`);
     assert.equal(provenance.sourceArchiveSha256, source.archiveSha256, `${version} 来源归档 SHA-256 不匹配`);
     assert.equal(provenance.license.sha256, source.licenseSha256, `${version} SOURCE.json 许可证 SHA-256 不匹配`);
+    await verifyLegacyPatch(version, source, provenance);
 
     const javascript = await readFile(resolve(repositoryRoot, source.vendorDirectory, "spine-webgl.js"), "utf8");
     const declarations = await readFile(resolve(repositoryRoot, source.vendorDirectory, "spine-webgl.d.ts"), "utf8");
@@ -121,19 +206,24 @@ for (const version of supportedVersions) {
     assert.ok(declarations.endsWith(declarationBoundary), `${version} declaration 缺少固定 ESM 边界`);
     assert.equal(
       sha256Contents(javascript.slice(0, -javascriptBoundary.length)),
-      source.buildArtifacts["spine-webgl.js"].upstreamSha256,
-      `${version} 官方 JavaScript 构建产物 SHA-256 不匹配`,
+      source.patch
+        ? source.buildArtifacts["spine-webgl.js"].patchedSha256
+        : source.buildArtifacts["spine-webgl.js"].upstreamSha256,
+      `${version} JavaScript namespace 构建产物 SHA-256 不匹配`,
     );
     assert.equal(
       sha256Contents(declarations.slice(0, -declarationBoundary.length)),
-      source.buildArtifacts["spine-webgl.d.ts"].upstreamSha256,
-      `${version} 官方 declaration 构建产物 SHA-256 不匹配`,
+      source.patch
+        ? source.buildArtifacts["spine-webgl.d.ts"].patchedSha256
+        : source.buildArtifacts["spine-webgl.d.ts"].upstreamSha256,
+      `${version} declaration namespace 构建产物 SHA-256 不匹配`,
     );
     for (const [artifact, digests] of Object.entries(source.buildArtifacts)) {
       assert.equal(await sha256(`${source.vendorDirectory}/${artifact}`), digests.sha256, `${version} ${artifact} SHA-256 不匹配`);
     }
     assert.equal(await sha256(`${source.vendorDirectory}/LICENSE`), source.licenseSha256, `${version} 许可证 SHA-256 不匹配`);
     assert.ok(documentation.includes(source.archiveSha256), `文档缺少 ${version} 来源归档 SHA-256`);
+    await verifyRequestedRebuild(version, source);
     runtimeDetails.set(version, {
       ...source,
       moduleSource: `/${source.vendorDirectory}/spine-webgl.js`,

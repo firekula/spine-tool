@@ -9,6 +9,7 @@ import type {
   TextureAlphaMode,
 } from "@/lib/spine/bridge-types";
 import { loadRuntimeModule } from "@/lib/spine/runtime-loader";
+import { runtimeDescriptor } from "@/lib/spine/runtime-registry";
 import {
   detectSpineVersion,
   type DetectedSpineVersion,
@@ -153,6 +154,9 @@ export async function createRuntimeSession(
   dependencies: RuntimeSessionDependencies = {},
 ): Promise<RuntimeSession> {
   const loadModule = dependencies.loadModule ?? loadRuntimeModule;
+  const alphaMode = runtimeDescriptor(version).requiresExplicitAlphaMode
+    ? dependencies.alphaMode
+    : undefined;
   const createObjectUrl = dependencies.createObjectUrl ?? ((file: File) => URL.createObjectURL(file));
   const revokeObjectUrl = dependencies.revokeObjectUrl ?? ((url: string) => URL.revokeObjectURL(url));
   const module = await loadModule(version);
@@ -180,7 +184,7 @@ export async function createRuntimeSession(
         atlasText: bundle.atlasText,
         skeleton,
         textureObjectUrls: objectUrls,
-        alphaMode: dependencies.alphaMode,
+        alphaMode,
       },
       release,
     };

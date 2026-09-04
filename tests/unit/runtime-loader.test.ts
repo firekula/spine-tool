@@ -153,6 +153,56 @@ describe("Runtime 资产验证", () => {
     expect(output).toContain("已验证 7 个隔离 Spine Runtime chunk");
   });
 
+  it("拒绝 3.8 兼容 patch 的 SHA-256 不匹配", () => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-patch-source-"));
+    const fixtureManifest = join(fixtureDirectory, "runtime-sources.json");
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, "scripts/runtime-sources.json"), "utf8"));
+      manifest.runtimes["3.8"].patch.sha256 = "0".repeat(64);
+      writeFileSync(fixtureManifest, JSON.stringify(manifest));
+
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixtureManifest },
+          stdio: "pipe",
+        },
+      )).toThrow(/patch SHA-256 不匹配/);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    "spine-webgl.js",
+    "spine-webgl.d.ts",
+    "spine-webgl.js.map",
+  ] as const)("拒绝 3.8 patch 未分别固定 %s 的上游与补丁构建 SHA-256", (artifact) => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-patch-build-source-"));
+    const fixtureManifest = join(fixtureDirectory, "runtime-sources.json");
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, "scripts/runtime-sources.json"), "utf8"));
+      delete manifest.runtimes["3.8"].buildArtifacts[artifact].patchedSha256;
+      writeFileSync(fixtureManifest, JSON.stringify(manifest));
+
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixtureManifest },
+          stdio: "pipe",
+        },
+      )).toThrow(/上游与补丁构建 SHA-256/);
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["非官方 resolved URL", "resolved", "https://example.invalid/spine-webgl-4.0.31.tgz"],
     ["不精确的 SRI", "integrity", "sha512-not-the-official-tarball"],

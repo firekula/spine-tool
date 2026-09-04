@@ -21,9 +21,9 @@
 
 3.7 vendor 使用 TypeScript 2.8.4 执行固定 commit 自带的 `tsc -p tsconfig.webgl.json`，不安装额外类型包；官方源码构建的 JS SHA-256 为 `074079ce08c0ad643578da8ec17dfe7e1e5d7ec7065106b05cd4cc703dca9c68`。该 compiler 的输出经上游 `build.sh` 指定的 `unexpand -t 4` 后与 commit 内自带的 `spine-webgl.js`、declaration 和 source map 逐字节一致，vendor 则与既有 legacy 流程相同保留 `tsc` 原始输出再追加固定 ESM 边界。该版官方 `spine-ts` 没有 `SkeletonBinary`，因此 adapter 明确只声明 JSON 能力；3.7 SKEL 不会转交给其他版本 Runtime。
 
-官方 npm 包没有 3.8.x，因此没有用第三方 Runtime 替代。`vendor/spine-runtime-3.8/spine-webgl.js` 来自上述固定 commit 的 `spine-ts`：安装官方构建脚本所需的 `@types/offscreencanvas@2019.7.3`，再用 TypeScript 3.9.10 执行 `tsc -p tsconfig.webgl.json`。生成的 JS SHA-256 为 `46fa3cc7d59ccbd81f69f2e04313092243133d3e32e6bca953d63aefdcbdafa3`。
+官方 npm 包没有 3.8.x，因此没有用第三方 Runtime 替代。`vendor/spine-runtime-3.8/spine-webgl.js` 来自上述固定 commit 的 `spine-ts`：安装官方构建脚本所需的 `@types/offscreencanvas@2019.7.3`，再用 TypeScript 3.9.10 执行 `tsc -p tsconfig.webgl.json`。未补丁上游 JS SHA-256 为 `46fa3cc7d59ccbd81f69f2e04313092243133d3e32e6bca953d63aefdcbdafa3`。受控兼容 patch（SHA-256 `3218fce4eef0781e1814b38842806d3d7b3d249615b8af652ec8e356af88d394`）只删除 JSON/Binary reader 对精确 `3.8.75` 的主动拒绝；补丁后 namespace JS SHA-256 为 `5b3e8ec15c3c70c8c2db03a23248538b3bca9ee01a25094a52bbe5eb26e803f7`。
 
-旧构建输出的是全局 `spine` namespace。为让 Vite 作为隔离 ESM chunk 导入，只在生成文件末尾追加 `export { spine }` 边界；追加后的 vendored JS SHA-256 为 `f50f6e18535881b5563b12bf0fa16a12972125677da3496959acdd5ed2619123`。完整机器可读记录位于 `vendor/spine-runtime-3.8/SOURCE.json`。`scripts/vendor-legacy-runtime.mjs --version X.Y --commit SHA --archive PATH` 只接受清单中对应 commit 且 SHA-256 匹配的官方 archive；来源 hash 或构建配置未固定时会 fail-closed，不生成资产。
+旧构建输出的是全局 `spine` namespace。为让 Vite 作为隔离 ESM chunk 导入，只在补丁后生成文件末尾追加 `export { spine }` 边界；最终 vendored JS SHA-256 为 `94ce2ebffcb581a45aac1f88a8aeafd12232fe37f8f45b5274d42ddbe881c00e`。完整机器可读记录位于 `vendor/spine-runtime-3.8/SOURCE.json`，分别固定上游、补丁后和最终 JS/declaration/source map hash。`scripts/vendor-legacy-runtime.mjs --version X.Y --commit SHA --archive PATH` 只接受清单中对应 commit 且 SHA-256 匹配的官方 archive；来源、patch 或任一构建 hash 未固定时会 fail-closed，不生成资产。
 
 ## 许可
 
@@ -32,7 +32,7 @@
 - `vendor/spine-runtime-3.8/LICENSE` 是 3.8 commit 中 `spine-ts/LICENSE` 的未改写副本（SHA-256 `6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39`）。
 - `public/licenses/SPINE-RUNTIMES-LICENSE.txt` 是 4.2.120/4.3.9 官方 npm 包 `LICENSE` 的未改写副本（SHA-256 `435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e`）；4.0.31 与 4.1.56 自身的官方 LICENSE 也随各自 npm 包进入依赖树。
 
-运行 `npm run verify-runtime-assets` 会校验八条来源记录、package alias、package-lock 中 webgl/core 各自的官方 `resolved`/`integrity`、已安装 package 与 core 版本、关键入口及 core 完整 `dist` tree 的 hash、webgl/core LICENSE hash、vendor `SOURCE.json`/ESM 边界，以及一次不落盘的 Vite 构建中所有已集成动态 chunk 的实际模块来源和 core 隔离。未集成版本只报告“来源已固定（Runtime 待集成）”，不会声称不存在的构建产物或 chunk 已验证。
+运行 `npm run verify-runtime-assets` 会校验八条来源记录、package alias、package-lock 中 webgl/core 各自的官方 `resolved`/`integrity`、已安装 package 与 core 版本、关键入口及 core 完整 `dist` tree 的 hash、webgl/core LICENSE hash、vendor `SOURCE.json`/ESM 边界，以及一次不落盘的 Vite 构建中所有已集成动态 chunk 的实际模块来源和 core 隔离。3.8 还会校验 patch 只能包含两个精确删除 hunk及上游/补丁后/最终三段 hash；提供 `SPINE_RUNTIME_REBUILD_VERSION=3.8` 与 `SPINE_RUNTIME_REBUILD_ARCHIVE=<固定归档>` 时，会从归档和 patch 重建并逐文件比较全部 vendor 产物。未集成版本只报告“来源已固定（Runtime 待集成）”，不会声称不存在的构建产物或 chunk 已验证。
 
 对 4.x，验证脚本还会要求 lockfile 的 `resolved` 精确等于表中的官方 registry tarball URL，并要求完整 SRI 分别为：
 

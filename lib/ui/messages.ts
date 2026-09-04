@@ -92,6 +92,11 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
     reason: "Runtime 无法解析骨骼 JSON。",
     action: "请检查 JSON 是否完整，并确认所选 Runtime 与导出版本一致。",
   },
+  SPINE_3_8_75_COMPATIBILITY: {
+    title: "Spine 3.8.75 尽力兼容",
+    reason: "官方 Spine 3.8 Runtime 将这个精确导出版本标记为存在已知问题；工具只移除主动拒绝，并原样尝试读取骨骼数据。",
+    action: "可以继续尝试预览；若失败，请尽量用其他 Spine 3.8 补丁版本重新导出。Atlas Region 仍可继续导出。",
+  },
   RUNTIME_CAPABILITY_UNSUPPORTED: {
     title: "当前 Runtime 不支持 SKEL",
     reason: "Spine 3.5–3.7 的官方 Web Runtime 仅支持 JSON 骨骼。",

@@ -78,3 +78,26 @@ for (const fixture of [
     expect(errors).toEqual([]);
   });
 }
+
+test("Spine 3.8.75 显示尽力兼容警告并在 Alpha 确认后渲染", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.goto("/");
+  await importFixture(page, {
+    atlas: atlasFor38("compat-pma.png"),
+    skeleton: skeletonJson38("3.8.75"),
+    pngNames: ["compat-pma.png"],
+    pngBuffers: { "compat-pma.png": makePng(1, 1, [255, 255, 255, 255]) },
+  });
+
+  await expect(page.getByText("Spine 3.8.75 尽力兼容")).toBeVisible();
+  await expect(page.getByText("SPINE_3_8_75_COMPATIBILITY")).toBeVisible();
+  await expect(page.locator(".issue-subject")).toContainText("Spine 3.8.75");
+  await expect(page.getByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" })).toBeVisible();
+  await expect(page.getByText("手动选择 Runtime")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "确认 Alpha 模式并加载预览" }).click();
+  await expect(page.getByRole("status").first()).toContainText("Spine 3.8 · 预览已就绪");
+  await expect(page.getByText("Spine 3.8.75 尽力兼容")).toBeVisible();
+  expect((await centerPixel(page))[3]).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});

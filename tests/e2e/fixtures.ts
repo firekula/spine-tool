@@ -105,9 +105,9 @@ export function atlasFor38(pageName = "page.png"): string {
   ].join("\n");
 }
 
-export function skeletonJson38(): string {
+export function skeletonJson38(version = "3.8.55"): string {
   return JSON.stringify({
-    skeleton: { hash: "self-built-alpha-e2e", spine: "3.8.55", width: 100, height: 100 },
+    skeleton: { hash: "self-built-alpha-e2e", spine: version, width: 100, height: 100 },
     bones: [{ name: "root" }],
     slots: [{ name: "body", bone: "root", attachment: "square" }],
     skins: [{

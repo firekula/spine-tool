@@ -4,15 +4,29 @@
   "commit": "8b4844bd4b193ba9e54487ed397a777993cbad56",
   "sourcePath": "spine-ts",
   "sourceArchiveSha256": "a31be4f37fb5ffa9b88822c38889efa406fb2201046592b8fdcb6d22925db9a4",
+  "patch": {
+    "path": "vendor/spine-runtime-3.8/patches/allow-3.8.75.patch",
+    "sha256": "3218fce4eef0781e1814b38842806d3d7b3d249615b8af652ec8e356af88d394"
+  },
   "build": {
     "typescript": "3.9.10",
     "offscreencanvasTypes": "2019.7.3",
     "command": "npx --yes --package typescript@3.9.10 tsc -p tsconfig.webgl.json",
-    "javascriptSha256BeforeEsmBoundary": "46fa3cc7d59ccbd81f69f2e04313092243133d3e32e6bca953d63aefdcbdafa3",
+    "upstreamArtifacts": {
+      "spine-webgl.js": "46fa3cc7d59ccbd81f69f2e04313092243133d3e32e6bca953d63aefdcbdafa3",
+      "spine-webgl.d.ts": "da9d140cf744dbb339043c26e3c1b629dc3e3e3b8ba6a20cd29c4d2935ac9047",
+      "spine-webgl.js.map": "ab06ecf9eae08c4ff73d7f35fd13fba43449b02d77910607c88a60ac6ee4a641"
+    },
+    "patchedArtifacts": {
+      "spine-webgl.js": "5b3e8ec15c3c70c8c2db03a23248538b3bca9ee01a25094a52bbe5eb26e803f7",
+      "spine-webgl.d.ts": "da9d140cf744dbb339043c26e3c1b629dc3e3e3b8ba6a20cd29c4d2935ac9047",
+      "spine-webgl.js.map": "79abb848e67ade2e700537b0ee54fc70ec8036b025a544bfb34fc211eae5cc19"
+    },
+    "javascriptSha256BeforeEsmBoundary": "5b3e8ec15c3c70c8c2db03a23248538b3bca9ee01a25094a52bbe5eb26e803f7",
     "declarationsSha256BeforeEsmBoundary": "da9d140cf744dbb339043c26e3c1b629dc3e3e3b8ba6a20cd29c4d2935ac9047",
-    "javascriptSha256": "f50f6e18535881b5563b12bf0fa16a12972125677da3496959acdd5ed2619123",
+    "javascriptSha256": "94ce2ebffcb581a45aac1f88a8aeafd12232fe37f8f45b5274d42ddbe881c00e",
     "declarationsSha256": "8a766f6566fca1607be4cc0e0655e0a9c35cdea7c4b41d77092c255196dcd170",
-    "sourceMapSha256": "ab06ecf9eae08c4ff73d7f35fd13fba43449b02d77910607c88a60ac6ee4a641",
+    "sourceMapSha256": "79abb848e67ade2e700537b0ee54fc70ec8036b025a544bfb34fc211eae5cc19",
     "esmBoundary": "The generated namespace build is unchanged before a trailing ESM export and matching declaration."
   },
   "license": {

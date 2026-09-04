@@ -22,18 +22,20 @@ function parseArguments(argv) {
     const flag = argv[index];
     const value = argv[index + 1];
     if (!flag?.startsWith("--") || !value || values.has(flag)) {
-      fail("参数无效；用法：vendor-legacy-runtime.mjs --version X.Y --commit SHA --archive PATH");
+      fail("参数无效；用法：vendor-legacy-runtime.mjs --version X.Y --commit SHA --archive PATH [--output PATH]");
     }
     values.set(flag, value);
   }
-  const allowed = new Set(["--version", "--commit", "--archive"]);
-  if (values.size !== allowed.size || [...values.keys()].some((flag) => !allowed.has(flag))) {
-    fail("参数无效；用法：vendor-legacy-runtime.mjs --version X.Y --commit SHA --archive PATH");
+  const required = ["--version", "--commit", "--archive"];
+  const allowed = new Set([...required, "--output"]);
+  if (required.some((flag) => !values.has(flag)) || [...values.keys()].some((flag) => !allowed.has(flag))) {
+    fail("参数无效；用法：vendor-legacy-runtime.mjs --version X.Y --commit SHA --archive PATH [--output PATH]");
   }
   return {
     version: values.get("--version"),
     commit: values.get("--commit"),
     archive: resolve(values.get("--archive")),
+    output: values.has("--output") ? resolve(values.get("--output")) : null,
   };
 }
 
@@ -54,7 +56,26 @@ async function run(command, args, options) {
   }
 }
 
-async function buildRuntime(source, archivePath) {
+async function compileRuntime(source, sourceDirectory) {
+  await run(
+    process.platform === "win32" ? "npx.cmd" : "npx",
+    [
+      "--yes", "--package", `typescript@${source.build.typescript}`,
+      "tsc", "-p", source.build.tsconfig,
+    ],
+    { cwd: sourceDirectory },
+  );
+}
+
+async function readBuildArtifacts(buildDirectory) {
+  return {
+    javascript: await readFile(resolve(buildDirectory, "spine-webgl.js"), "utf8"),
+    declarations: await readFile(resolve(buildDirectory, "spine-webgl.d.ts"), "utf8"),
+    sourceMap: await readFile(resolve(buildDirectory, "spine-webgl.js.map")),
+  };
+}
+
+async function buildRuntime(source, archivePath, outputDirectory) {
   const archiveContents = await readFile(archivePath);
   assert.equal(
     digest(archiveContents),
@@ -66,6 +87,15 @@ async function buildRuntime(source, archivePath) {
   try {
     await run("tar", ["-xf", archivePath, "-C", workDirectory], { cwd: repositoryRoot });
     const sourceDirectory = resolve(workDirectory, source.build.sourceDirectory);
+    let patchPath = null;
+    if (source.patch) {
+      patchPath = resolve(repositoryRoot, source.patch.path);
+      const patchContents = await readFile(patchPath);
+      assert.equal(digest(patchContents), source.patch.sha256, "Runtime patch SHA-256 不匹配");
+      // Git archives preserve the official CRLF sources while the reviewable
+      // patch is stored with repository-standard LF line endings.
+      await run("git", ["apply", "--check", "--ignore-space-change", patchPath], { cwd: workDirectory });
+    }
     if (source.build.offscreencanvasTypes) {
       await run(
         process.platform === "win32" ? "npm.cmd" : "npm",
@@ -76,31 +106,40 @@ async function buildRuntime(source, archivePath) {
         { cwd: sourceDirectory },
       );
     }
-    await run(
-      process.platform === "win32" ? "npx.cmd" : "npx",
-      [
-        "--yes", "--package", `typescript@${source.build.typescript}`,
-        "tsc", "-p", source.build.tsconfig,
-      ],
-      { cwd: sourceDirectory },
-    );
-
     const buildDirectory = resolve(sourceDirectory, source.build.outputDirectory);
-    const upstreamJavascript = await readFile(resolve(buildDirectory, "spine-webgl.js"), "utf8");
-    const upstreamDeclarations = await readFile(resolve(buildDirectory, "spine-webgl.d.ts"), "utf8");
-    const sourceMap = await readFile(resolve(buildDirectory, "spine-webgl.js.map"));
-    const javascript = `${upstreamJavascript}${javascriptBoundary}`;
-    const declarations = `${upstreamDeclarations}${declarationBoundary}`;
+    await compileRuntime(source, sourceDirectory);
+    const upstream = await readBuildArtifacts(buildDirectory);
+
+    if (patchPath) {
+      assert.equal(digest(upstream.javascript), source.buildArtifacts["spine-webgl.js"].upstreamSha256, "上游 JavaScript 构建产物 SHA-256 不匹配");
+      assert.equal(digest(upstream.declarations), source.buildArtifacts["spine-webgl.d.ts"].upstreamSha256, "上游 declaration 构建产物 SHA-256 不匹配");
+      assert.equal(digest(upstream.sourceMap), source.buildArtifacts["spine-webgl.js.map"].upstreamSha256, "上游 source map 构建产物 SHA-256 不匹配");
+      await run("git", ["apply", "--ignore-space-change", patchPath], { cwd: workDirectory });
+      await compileRuntime(source, sourceDirectory);
+    }
+
+    const built = patchPath ? await readBuildArtifacts(buildDirectory) : upstream;
+    const expectedJavascript = patchPath
+      ? source.buildArtifacts["spine-webgl.js"].patchedSha256
+      : source.buildArtifacts["spine-webgl.js"].upstreamSha256;
+    const expectedDeclarations = patchPath
+      ? source.buildArtifacts["spine-webgl.d.ts"].patchedSha256
+      : source.buildArtifacts["spine-webgl.d.ts"].upstreamSha256;
+    const expectedSourceMap = patchPath
+      ? source.buildArtifacts["spine-webgl.js.map"].patchedSha256
+      : source.buildArtifacts["spine-webgl.js.map"].sha256;
+    const javascript = `${built.javascript}${javascriptBoundary}`;
+    const declarations = `${built.declarations}${declarationBoundary}`;
 
     assert.equal(
-      digest(upstreamJavascript),
-      source.buildArtifacts["spine-webgl.js"].upstreamSha256,
-      "官方 JavaScript 构建产物 SHA-256 不匹配",
+      digest(built.javascript),
+      expectedJavascript,
+      "最终 JavaScript namespace 构建产物 SHA-256 不匹配",
     );
     assert.equal(
-      digest(upstreamDeclarations),
-      source.buildArtifacts["spine-webgl.d.ts"].upstreamSha256,
-      "官方 declaration 构建产物 SHA-256 不匹配",
+      digest(built.declarations),
+      expectedDeclarations,
+      "最终 declaration namespace 构建产物 SHA-256 不匹配",
     );
     assert.equal(
       digest(javascript),
@@ -113,19 +152,19 @@ async function buildRuntime(source, archivePath) {
       "ESM declaration 构建产物 SHA-256 不匹配",
     );
     assert.equal(
-      digest(sourceMap),
-      source.buildArtifacts["spine-webgl.js.map"].sha256,
+      digest(built.sourceMap),
+      expectedSourceMap,
       "source map 构建产物 SHA-256 不匹配",
     );
 
     const licensePath = resolve(sourceDirectory, "LICENSE");
     assert.equal(digest(await readFile(licensePath)), source.licenseSha256, "许可证 SHA-256 不匹配");
 
-    const vendorDirectory = resolve(repositoryRoot, source.vendorDirectory);
+    const vendorDirectory = outputDirectory ?? resolve(repositoryRoot, source.vendorDirectory);
     await mkdir(vendorDirectory, { recursive: true });
     await writeFile(resolve(vendorDirectory, "spine-webgl.js"), javascript);
     await writeFile(resolve(vendorDirectory, "spine-webgl.d.ts"), declarations);
-    await writeFile(resolve(vendorDirectory, "spine-webgl.js.map"), sourceMap);
+    await writeFile(resolve(vendorDirectory, "spine-webgl.js.map"), built.sourceMap);
     await copyFile(licensePath, resolve(vendorDirectory, "LICENSE"));
     await writeFile(resolve(vendorDirectory, "SOURCE.json"), `${JSON.stringify({
       repository: "https://github.com/EsotericSoftware/spine-runtimes.git",
@@ -133,12 +172,17 @@ async function buildRuntime(source, archivePath) {
       commit: source.commit,
       sourcePath: source.build.sourceDirectory,
       sourceArchiveSha256: source.archiveSha256,
+      ...(source.patch ? { patch: source.patch } : {}),
       build: {
         typescript: source.build.typescript,
         offscreencanvasTypes: source.build.offscreencanvasTypes,
         command: `npx --yes --package typescript@${source.build.typescript} tsc -p ${source.build.tsconfig}`,
-        javascriptSha256BeforeEsmBoundary: source.buildArtifacts["spine-webgl.js"].upstreamSha256,
-        declarationsSha256BeforeEsmBoundary: source.buildArtifacts["spine-webgl.d.ts"].upstreamSha256,
+        ...(source.patch ? {
+          upstreamArtifacts: Object.fromEntries(Object.entries(source.buildArtifacts).map(([artifact, hashes]) => [artifact, hashes.upstreamSha256])),
+          patchedArtifacts: Object.fromEntries(Object.entries(source.buildArtifacts).map(([artifact, hashes]) => [artifact, hashes.patchedSha256])),
+        } : {}),
+        javascriptSha256BeforeEsmBoundary: expectedJavascript,
+        declarationsSha256BeforeEsmBoundary: expectedDeclarations,
         javascriptSha256: source.buildArtifacts["spine-webgl.js"].sha256,
         declarationsSha256: source.buildArtifacts["spine-webgl.d.ts"].sha256,
         sourceMapSha256: source.buildArtifacts["spine-webgl.js.map"].sha256,
@@ -159,7 +203,7 @@ try {
   if (!source.archiveSha256 || !source.build || !source.buildArtifacts || !source.licenseSha256) {
     fail(`Spine ${options.version} 来源元数据尚未完整固定，拒绝生成`);
   }
-  await buildRuntime(source, options.archive);
+  await buildRuntime(source, options.archive, options.output);
   console.log(`Spine ${options.version} vendor 资产已从固定官方归档生成`);
 } catch (error) {
   console.error(`Runtime vendor 生成失败：${error?.message || String(error)}`);
