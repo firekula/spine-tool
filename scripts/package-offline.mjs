@@ -11,7 +11,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = resolve(process.env.SPINE_OFFLINE_DIST_DIR ?? resolve(repositoryRoot, "dist-offline"));
 const offlineEntry = "offline/index.html";
 const requiredLicense = "licenses/SPINE-RUNTIMES-LICENSE.txt";
-const requiredRuntimeChunks = ["3_8", "4_0", "4_1", "4_2"];
+const requiredRuntimeChunks = ["3_5", "3_6", "3_7", "3_8", "4_0", "4_1", "4_2", "4_3"];
 const outputArchive = resolve(process.env.SPINE_OFFLINE_ARCHIVE ?? resolve(repositoryRoot, "spine-preview-export-offline.zip"));
 const execFileAsync = promisify(execFile);
 const zipEntryOptions = {
@@ -24,7 +24,7 @@ const zipEntryOptions = {
 
 const offlineInstructions = `Spine 动画预览与 Atlas 子图导出工具（离线版）
 
-本离线包已包含页面、四个 Spine Runtime 和许可文件；启动后不需要联网。
+本离线包已包含页面、八个 Spine Runtime 和许可文件；启动后不需要联网。
 
 Windows 64 位推荐启动方式：双击“启动离线工具.cmd”。它会调用 Windows 自带 PowerShell 建立本机 HTTP 服务，并自动打开浏览器。若浏览器没有自动打开，请访问脚本窗口显示的 http://127.0.0.1:8765/ 。关闭 PowerShell 窗口即可停止服务。
 
@@ -52,6 +52,7 @@ async function buildOffline() {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   await execFileAsync(npmCommand, ["run", "build:offline"], {
     cwd: repositoryRoot,
+    env: { ...process.env, NODE_ENV: "production" },
     stdio: "inherit",
   });
 }
@@ -70,12 +71,11 @@ const archivePaths = new Set(archiveFiles.map(({ archivePath }) => archivePath))
 
 assert.ok(archivePaths.has("index.html"), "离线构建缺少 offline/index.html");
 assert.ok(archivePaths.has(requiredLicense), `离线构建缺少许可文件 ${requiredLicense}`);
-for (const version of requiredRuntimeChunks) {
-  assert.ok(
-    [...archivePaths].some((path) => new RegExp(`^assets/runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(path)),
-    `离线构建缺少 Spine ${version.replace("_", ".")} Runtime chunk`,
-  );
-}
+const runtimeChunkVersions = [...archivePaths]
+  .map((path) => /^assets\/runtime-([34]_[0-9])-[A-Za-z0-9_-]+\.js$/.exec(path)?.[1])
+  .filter(Boolean)
+  .sort();
+assert.deepEqual(runtimeChunkVersions, requiredRuntimeChunks, "离线构建必须精确包含八个 Spine Runtime chunk");
 
 const remoteDependencies = [];
 for (const file of archiveFiles) {

@@ -1,13 +1,28 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const script = resolve(repositoryRoot, "scripts/package-offline.mjs");
 const temporaryDirectories: string[] = [];
+let verifiedBuildDirectory: string;
+
+beforeAll(() => {
+  verifiedBuildDirectory = mkdtempSync(join(tmpdir(), "spine-offline-verified-build-"));
+  execFileSync(npmCommand, ["run", "build:offline", "--", "--outDir", verifiedBuildDirectory], {
+    cwd: repositoryRoot,
+    env: { ...process.env, NODE_ENV: "production" },
+    stdio: "pipe",
+  });
+}, 30_000);
+
+afterAll(() => {
+  rmSync(verifiedBuildDirectory, { recursive: true, force: true });
+});
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -22,7 +37,7 @@ function makeOfflineBuild(overrides: Partial<Record<"html" | "js" | "css", strin
   writeFileSync(join(directory, "offline/index.html"), overrides.html ?? '<p>离线中文说明</p><script type="module" src="../assets/index-a.js"></script>');
   writeFileSync(join(directory, "assets/index-a.js"), overrides.js ?? 'export const offline = "本地相对资源";');
   writeFileSync(join(directory, "assets/index-a.css"), overrides.css ?? "body { color: black; }");
-  for (const version of ["3_8", "4_0", "4_1", "4_2"]) {
+  for (const version of ["3_5", "3_6", "3_7", "3_8", "4_0", "4_1", "4_2", "4_3"]) {
     writeFileSync(join(directory, `assets/runtime-${version}-a.js`), "export {};\n");
   }
   writeFileSync(join(directory, "licenses/SPINE-RUNTIMES-LICENSE.txt"), "license\n");
@@ -56,6 +71,33 @@ describe("离线包脚本", () => {
     const secondHash = createHash("sha256").update(readFileSync(archive)).digest("hex");
 
     expect(secondHash).toBe(firstHash);
+  });
+
+  it("同一真实八 Runtime 构建连续打包两次产生完全相同的 SHA-256", () => {
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-real-archive-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+
+    packageFixture(verifiedBuildDirectory, archive);
+    const firstHash = createHash("sha256").update(readFileSync(archive)).digest("hex");
+    packageFixture(verifiedBuildDirectory, archive);
+    const secondHash = createHash("sha256").update(readFileSync(archive)).digest("hex");
+
+    expect(secondHash).toBe(firstHash);
+  });
+
+  it.each(["3_5", "3_6", "3_7", "4_3"])("拒绝 Spine %s Runtime chunk 的单字节篡改", (version) => {
+    const tamperedBuild = mkdtempSync(join(tmpdir(), `spine-offline-tampered-${version}-`));
+    temporaryDirectories.push(tamperedBuild);
+    cpSync(verifiedBuildDirectory, tamperedBuild, { recursive: true });
+    const runtimeName = readdirSync(join(tamperedBuild, "assets"))
+      .find((name) => new RegExp(`^runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(name));
+    expect(runtimeName).toBeDefined();
+    const runtimePath = join(tamperedBuild, "assets", runtimeName!);
+    writeFileSync(runtimePath, Buffer.concat([readFileSync(runtimePath), Buffer.from(" ")]));
+
+    expect(() => packageFixture(tamperedBuild, join(tamperedBuild, "offline.zip")))
+      .toThrow(/远程运行依赖/);
   });
 
   it("拒绝所有受支持载体中的外部运行网络目标", () => {

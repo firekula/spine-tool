@@ -21,8 +21,14 @@ function contentType(pathname: string): string {
 }
 
 test.beforeAll(async () => {
+  const packageEnvironment = { ...process.env };
+  // Playwright keeps Chromium assets under TMPDIR. A strict Runtime rebuild
+  // nested there inherits the repository's node_modules/@types and breaks the
+  // pinned legacy TypeScript compiler, so give the child the platform default.
+  delete packageEnvironment.TMPDIR;
   execFileSync(npmCommand, ["run", "package:offline"], {
     cwd: repositoryRoot,
+    env: packageEnvironment,
     stdio: "pipe",
   });
   const offlineZip = await JSZip.loadAsync(await readFile(resolve(repositoryRoot, "spine-preview-export-offline.zip")));
@@ -31,7 +37,7 @@ test.beforeAll(async () => {
   expect(filenames).toContain("index.html");
   expect(filenames).toContain("licenses/SPINE-RUNTIMES-LICENSE.txt");
   expect(filenames).toContain("离线使用说明.txt");
-  for (const version of ["3_8", "4_0", "4_1", "4_2"]) {
+  for (const version of ["3_5", "3_6", "3_7", "3_8", "4_0", "4_1", "4_2", "4_3"]) {
     expect(filenames.some((name) => new RegExp(`^assets/runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(name))).toBe(true);
   }
   const offlineHtml = await offlineZip.file("index.html")!.async("string");

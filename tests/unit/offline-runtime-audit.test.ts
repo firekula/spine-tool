@@ -160,6 +160,21 @@ describe("离线运行依赖审计", () => {
     )).not.toEqual([]);
   });
 
+  it("来源元数据 URL 不会成为可执行网络目标例外", () => {
+    const sourceUrl = "https://github.com/EsotericSoftware/spine-runtimes/tree/";
+
+    expect(externalRuntimeDependencies(
+      "assets/runtime-review.js",
+      `export const source = { url: "${sourceUrl}" };`,
+    )).not.toEqual([]);
+    expect(externalRuntimeDependencies(
+      "assets/runtime-review.js",
+      `fetch("${sourceUrl}");`,
+    )).toEqual(expect.arrayContaining([
+      expect.stringContaining("fetch 使用外部 URL"),
+    ]));
+  });
+
   it("允许静态的 hashed 相对路径、blob、data 和中文字符串", () => {
     const javascript = [
       'import("./runtime-3_8-Ab12cd34.js")',

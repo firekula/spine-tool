@@ -8,26 +8,76 @@ const maxCanonicalizationPasses = 8;
 
 // These are complete SHA-256 digests of reviewed Vite output, not filename hashes.
 // A source, dependency, minifier, or shared-chunk change invalidates the exception.
+// Static URL allowances cover inert metadata/namespaces only; network sinks are
+// audited independently and still reject the same exact URL when executable.
 const trustedDynamicJavaScript = new Map([
-  ["assets/index-Dr0iepuV.js", {
+  ["assets/index-YgmOeDMo.js", {
     kind: "vite-modulepreload",
-    sha256: "65ce91f4d549863a711fc073e0c6a53f3990d92b2a2a1881d443081276b33340",
+    sha256: "a6be7668ac7570fda2355b97a5d98312ca2fad1bb10cc9dfee2f1e7c6aebb4b6",
+    allowedStaticExternalUrls: [
+      "https://reactjs.org/docs/error-decoder.html?invariant=",
+      "http://www.w3.org/1999/xlink",
+      "http://www.w3.org/XML/1998/namespace",
+      "http://www.w3.org/2000/svg",
+      "http://www.w3.org/1998/Math/MathML",
+      "http://www.w3.org/1999/xhtml",
+    ],
   }],
-  ["assets/runtime-3_8-C5yBT3zC.js", {
+  ["assets/runtime-3_5-Bi8Jnn0Q.js", {
     kind: "spine-runtime",
-    sha256: "72c0a6022eb3df8edd429a848dab4677b7951d2d01ba351436a2cedbf965b434",
+    sha256: "d56157c87cfd7fc95ad93c2a9dc2bf1ef68ca3069f942c88c16144799539912a",
+    allowedStaticExternalUrls: [
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/afdbbc2044fb56c762d4e2eb54b63b1bb9276a48/spine-ts",
+    ],
   }],
-  ["assets/runtime-4_0-CCQyGAmG.js", {
+  ["assets/runtime-3_6-CLmbD_xL.js", {
     kind: "spine-runtime",
-    sha256: "82eba48a3182eb38a38bcc5ec7de90287907c92a1e7161e69725c20b5d0e5013",
+    sha256: "af490ed903e2c97bb2aa213f36a8b9d3ac716fcb3e7573f622e6a70e010a6d29",
+    allowedStaticExternalUrls: [
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/654c20e5b0e523040b6366bbd1042510d2645134/spine-ts",
+    ],
   }],
-  ["assets/runtime-4_1-sRfPX9k5.js", {
+  ["assets/runtime-3_7-2FCUw6u4.js", {
     kind: "spine-runtime",
-    sha256: "b69c15407bd1084d7e1fa496ee08aae591ec03c0848dd04fb1f4fe2c1c2f5576",
+    sha256: "77117fe1a5e8ec9844ff6f301f78458c0c37dc4e04184382d37c428d6331448f",
+    allowedStaticExternalUrls: [
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/9639bcc81722d7178fd9d1cdc1a3d55a4c91f989/spine-ts",
+    ],
   }],
-  ["assets/runtime-4_2-CCHF-W9k.js", {
+  ["assets/runtime-3_8-DGhdHgL6.js", {
     kind: "spine-runtime",
-    sha256: "00062ee0219213f750a83e65b5936c837a31ad469dfcb682ca539d805bf79e2a",
+    sha256: "7740adef09520057021b5fe058fc32eb45276f9115b0578918c26a05d73c4ac2",
+    allowedStaticExternalUrls: [
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
+    ],
+  }],
+  ["assets/runtime-4_0-COt9E0L2.js", {
+    kind: "spine-runtime",
+    sha256: "77fc509156b348806d8083da5026d1e95498548b832a65ae55cb38ecf55950b0",
+    allowedStaticExternalUrls: [
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
+    ],
+  }],
+  ["assets/runtime-4_1-DTh0mXCj.js", {
+    kind: "spine-runtime",
+    sha256: "19e07935cc8fa3379ca1956048a98083683def133870870a658475ca3dc01d46",
+    allowedStaticExternalUrls: [
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
+    ],
+  }],
+  ["assets/runtime-4_2-DCUIXHIn.js", {
+    kind: "spine-runtime",
+    sha256: "31a111f14637a01dfb33eef7a9447e67564d960a7e42bbdaf894aa5b1d366ebe",
+    allowedStaticExternalUrls: [
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
+    ],
+  }],
+  ["assets/runtime-4_3-CyzD6Xgf.js", {
+    kind: "spine-runtime",
+    sha256: "b6d01752e0deabaf55737fa1b91046f8cc570a012cabee1e1bce391205da264a",
+    allowedStaticExternalUrls: [
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz",
+    ],
   }],
 ]);
 
@@ -581,14 +631,17 @@ function externalJavaScriptTargets(path, contents) {
 
   const visit = (node) => {
     if (
-      !trust
-      && (ts.isStringLiteral(node)
-        || ts.isNoSubstitutionTemplateLiteral(node)
-        || ts.isTemplateExpression(node)
-        || (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken))
+      ts.isStringLiteral(node)
+      || ts.isNoSubstitutionTemplateLiteral(node)
+      || ts.isTemplateExpression(node)
+      || (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken)
     ) {
       const value = resolvedStaticString(node, staticValues);
-      if (value !== undefined && isExternalUrl(value)) record(node, "普通应用代码包含静态外部 URL");
+      if (
+        value !== undefined
+        && isExternalUrl(value)
+        && !trust?.allowedStaticExternalUrls.includes(value)
+      ) record(node, "JavaScript 包含未经批准的静态外部 URL");
     }
 
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {

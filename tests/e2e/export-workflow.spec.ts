@@ -76,6 +76,7 @@ test("Atlas-only page scale 作为直接证据，多页冲突需确认手动倍�
   await expect(page.getByText("置信度", { exact: true }).locator("xpath=following-sibling::dd")).toHaveText("高");
   await expect(page.getByText(/page\.png.*scale 0\.5.*恢复 2 倍/)).toBeVisible();
 
+  await page.getByRole("button", { name: "重新导入" }).click();
   await importFixture(page, {
     atlas: [
       atlasFor("half.png", ["half"]).replace("pma: false", "pma: false\nscale: 0.5"),
