@@ -18,7 +18,13 @@ export const runtimeConstructors = {
   SkeletonData: runtime.SkeletonData,
 } as unknown as RuntimeConstructorIdentity;
 
+export const capabilities = {
+  skeletonJson: true,
+  skeletonBinary: true,
+} as const;
+
 const adapter = {
+  capabilities,
   atlasMode: "page-setter",
   constructors: runtime,
   isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (

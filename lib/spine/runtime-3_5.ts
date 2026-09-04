@@ -1,27 +1,27 @@
-import { spine } from "../../vendor/spine-runtime-3.8/spine-webgl.js";
+import { spine } from "../../vendor/spine-runtime-3.5/spine-webgl.js";
 import type { RuntimeConstructorIdentity, RuntimeSourceInfo } from "./bridge-types";
 import { createRuntimeBridge, type RuntimeAdapter } from "./runtime-factory";
 
-export const version = "3.8" as const;
+export const version = "3.5" as const;
 
 export const source = {
   kind: "git-vendor",
   packageName: "EsotericSoftware/spine-runtimes:spine-ts",
-  version: "3.8",
-  revision: "8b4844bd4b193ba9e54487ed397a777993cbad56",
-  url: "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
-  sha256: "a31be4f37fb5ffa9b88822c38889efa406fb2201046592b8fdcb6d22925db9a4",
+  version: "3.5",
+  revision: "afdbbc2044fb56c762d4e2eb54b63b1bb9276a48",
+  url: "https://github.com/EsotericSoftware/spine-runtimes/tree/afdbbc2044fb56c762d4e2eb54b63b1bb9276a48/spine-ts",
+  sha256: "a40a64268da2782405b66516c45736f7c86d438fe82e8e950733b5f3aa74a7c5",
 } as const satisfies RuntimeSourceInfo;
+
+export const capabilities = {
+  skeletonJson: true,
+  skeletonBinary: false,
+} as const;
 
 export const runtimeConstructors = {
   Skeleton: spine.Skeleton,
   SkeletonData: spine.SkeletonData,
 } as unknown as RuntimeConstructorIdentity;
-
-export const capabilities = {
-  skeletonJson: true,
-  skeletonBinary: true,
-} as const;
 
 const adapter = {
   capabilities,
@@ -30,7 +30,6 @@ const adapter = {
     TextureAtlas: spine.TextureAtlas,
     AtlasAttachmentLoader: spine.AtlasAttachmentLoader,
     SkeletonJson: spine.SkeletonJson,
-    SkeletonBinary: spine.SkeletonBinary,
     Skeleton: spine.Skeleton,
     SkeletonData: spine.SkeletonData,
     AnimationStateData: spine.AnimationStateData,

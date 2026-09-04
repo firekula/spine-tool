@@ -6,6 +6,27 @@
     "includedAt": "public/licenses/SPINE-RUNTIMES-LICENSE.txt"
   },
   "fixtures": {
+    "3.5": {
+      "revision": "ab226ab6810e9dc3483f01e1aefa979b2b8864dd",
+      "editorVersion": "3.5.03-beta",
+      "skeletons": {
+        "json": "spineboy.json"
+      },
+      "files": {
+        "spineboy.json": {
+          "source": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/ab226ab6810e9dc3483f01e1aefa979b2b8864dd/examples/spineboy/export/spineboy.json",
+          "sha256": "ea67594afc26bc6b9bb29b50664680dd65bb225e3a1856073f6c30fe6744e8cb"
+        },
+        "spineboy-pma.atlas": {
+          "source": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/ab226ab6810e9dc3483f01e1aefa979b2b8864dd/examples/spineboy/export/spineboy-pma.atlas",
+          "sha256": "041fd0751bed7fcfabf8067c88bf1591855d3290b92492ce61ade92be1a52518"
+        },
+        "spineboy-pma.png": {
+          "source": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/ab226ab6810e9dc3483f01e1aefa979b2b8864dd/examples/spineboy/export/spineboy-pma.png",
+          "sha256": "df598bab961c3c8898d70d8c3b63342454c2d201dd045527dc3583d558a3d444"
+        }
+      }
+    },
     "3.8": {
       "revision": "8b4844bd4b193ba9e54487ed397a777993cbad56",
       "editorVersion": "3.8.55",

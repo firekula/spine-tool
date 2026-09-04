@@ -92,6 +92,11 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
     reason: "Runtime 无法解析骨骼 JSON。",
     action: "请检查 JSON 是否完整，并确认所选 Runtime 与导出版本一致。",
   },
+  RUNTIME_CAPABILITY_UNSUPPORTED: {
+    title: "当前 Runtime 不支持 SKEL",
+    reason: "Spine 3.5–3.7 的官方 Web Runtime 仅支持 JSON 骨骼。",
+    action: "请用同一 Spine 版本重新导出 JSON；工具不会跨版本尝试读取 SKEL。",
+  },
   WEBGL_UNAVAILABLE: {
     title: "浏览器无法启动 WebGL",
     reason: "当前浏览器或图形环境没有提供可用的 WebGL context。",

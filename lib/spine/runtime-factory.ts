@@ -6,6 +6,7 @@ import {
 import type {
   PlaybackSnapshot,
   RegionAttachmentMetadata,
+  RuntimeCapabilities,
   RuntimeLoadInput,
   RuntimeView,
   SkeletonBounds,
@@ -109,12 +110,13 @@ interface RuntimeRenderer {
 }
 
 export interface RuntimeAdapter {
+  capabilities: RuntimeCapabilities;
   atlasMode: "constructor-loader" | "page-setter";
   constructors: {
     TextureAtlas: RuntimeConstructor<RuntimeAtlas>;
     AtlasAttachmentLoader: RuntimeConstructor;
     SkeletonJson: RuntimeConstructor<{ readSkeletonData(input: string | unknown): RuntimeSkeletonData }>;
-    SkeletonBinary: RuntimeConstructor<{ readSkeletonData(input: Uint8Array): RuntimeSkeletonData }>;
+    SkeletonBinary?: RuntimeConstructor<{ readSkeletonData(input: Uint8Array): RuntimeSkeletonData }>;
     Skeleton: RuntimeConstructor<RuntimeSkeleton>;
     SkeletonData: RuntimeConstructor;
     AnimationStateData: RuntimeConstructor;
@@ -132,6 +134,20 @@ export interface RuntimeAdapter {
   };
   updateSkeleton(skeleton: RuntimeSkeleton, delta: number): void;
   updateWorldTransform(skeleton: RuntimeSkeleton): void;
+}
+
+export class RuntimeCapabilityError extends Error {
+  readonly code = "RUNTIME_CAPABILITY_UNSUPPORTED";
+  readonly details: string[];
+
+  constructor(version: SupportedSpineVersion, capability: "skeletonBinary") {
+    const detail = capability === "skeletonBinary"
+      ? `Spine ${version} 官方 Runtime 不支持 SKEL（二进制）骨骼；请改用同版本 JSON 导出。工具不会交给其他版本 Runtime 读取。`
+      : `Spine ${version} 官方 Runtime 不支持所需能力。`;
+    super(detail);
+    this.name = "RuntimeCapabilityError";
+    this.details = [detail];
+  }
 }
 
 class LoadCancellation {
@@ -393,6 +409,12 @@ class RuntimeBridge implements SpineRuntimeBridge {
   async load(input: RuntimeLoadInput): Promise<SkeletonMetadata> {
     if (this.disposed) throw new Error("Runtime bridge 已释放");
     if (this.atlas || this.renderer || this.state) throw new Error("Runtime bridge 已加载资源");
+    if (
+      input.skeleton.kind === "skel"
+      && (!this.adapter.capabilities.skeletonBinary || !this.adapter.constructors.SkeletonBinary)
+    ) {
+      throw new RuntimeCapabilityError(this.version, "skeletonBinary");
+    }
     if (this.version === "3.8" && input.alphaMode === undefined) {
       throw new Error("Spine 3.8 纹理的 Alpha 模式需要明确选择（预乘 PMA 或直通 Straight）。");
     }
@@ -449,7 +471,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
       const attachmentLoader = new AtlasAttachmentLoader(createdAtlas.atlas);
       const reader = input.skeleton.kind === "json"
         ? new SkeletonJson(attachmentLoader)
-        : new SkeletonBinary(attachmentLoader);
+        : new SkeletonBinary!(attachmentLoader);
       const data = reader.readSkeletonData(
         input.skeleton.kind === "json" ? input.skeleton.text : input.skeleton.bytes,
       );
@@ -542,7 +564,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
     this.adapter.updateWorldTransform(this.skeleton);
     const offset = createRuntimeVector2();
     const size = createRuntimeVector2();
-    this.skeleton.getBounds(offset, size);
+    this.skeleton.getBounds(offset, size, []);
     if (
       !Number.isFinite(offset.x)
       || !Number.isFinite(offset.y)

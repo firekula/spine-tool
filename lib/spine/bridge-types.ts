@@ -87,9 +87,15 @@ export interface RuntimeConstructorIdentity {
   SkeletonData: new () => unknown;
 }
 
+export interface RuntimeCapabilities {
+  readonly skeletonJson: true;
+  readonly skeletonBinary: boolean;
+}
+
 export interface SpineRuntimeModule {
   readonly version: SupportedSpineVersion;
   readonly source: RuntimeSourceInfo;
+  readonly capabilities: RuntimeCapabilities;
   readonly runtimeConstructors: RuntimeConstructorIdentity;
   createBridge(): SpineRuntimeBridge;
 }

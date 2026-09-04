@@ -66,14 +66,16 @@ async function buildRuntime(source, archivePath) {
   try {
     await run("tar", ["-xf", archivePath, "-C", workDirectory], { cwd: repositoryRoot });
     const sourceDirectory = resolve(workDirectory, source.build.sourceDirectory);
-    await run(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      [
-        "install", "--no-save", "--ignore-scripts", "--package-lock=false",
-        `@types/offscreencanvas@${source.build.offscreencanvasTypes}`,
-      ],
-      { cwd: sourceDirectory },
-    );
+    if (source.build.offscreencanvasTypes) {
+      await run(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        [
+          "install", "--no-save", "--ignore-scripts", "--package-lock=false",
+          `@types/offscreencanvas@${source.build.offscreencanvasTypes}`,
+        ],
+        { cwd: sourceDirectory },
+      );
+    }
     await run(
       process.platform === "win32" ? "npx.cmd" : "npx",
       [

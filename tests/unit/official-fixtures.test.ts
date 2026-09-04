@@ -8,25 +8,51 @@ import { detectSpineVersion } from "@/lib/spine/version";
 
 const fixtureRoot = resolve(import.meta.dirname, "../fixtures/official-spine");
 const sources = JSON.parse(readFileSync(resolve(fixtureRoot, "SOURCES.json"), "utf8")) as {
-  fixtures: Record<string, { editorVersion: string; files: Record<string, string> }>;
+  fixtures: Record<string, {
+    revision: string;
+    editorVersion: string;
+    skeletons?: { json?: string; skel?: string };
+    files: Record<string, string | { source: string; sha256: string }>;
+  }>;
 };
 
 describe("官方 Spine fixtures", () => {
   it.each(Object.entries(sources.fixtures))("%s 文件与固定官方 revision 的 SHA-256 一致", (version, fixture) => {
     for (const [name, expected] of Object.entries(fixture.files)) {
       const bytes = readFileSync(resolve(fixtureRoot, version, name));
-      expect(createHash("sha256").update(bytes).digest("hex"), name).toBe(expected);
+      const sha256 = typeof expected === "string" ? expected : expected.sha256;
+      expect(createHash("sha256").update(bytes).digest("hex"), name).toBe(sha256);
     }
   });
 
-  it.each(Object.entries(sources.fixtures))("%s JSON 与 SKEL 均检测为对应版本", async (version, fixture) => {
-    for (const name of ["spineboy-ess.json", "spineboy-ess.skel"]) {
+  it.each(Object.entries(sources.fixtures))("%s 声明的 skeleton 均检测为对应版本", async (version, fixture) => {
+    const skeletons = fixture.skeletons ?? {
+      json: "spineboy-ess.json",
+      skel: "spineboy-ess.skel",
+    };
+    for (const name of Object.values(skeletons)) {
+      if (!name) continue;
       const bytes = readFileSync(resolve(fixtureRoot, version, name));
       const file = new File([bytes], name, { type: "application/octet-stream" });
       await expect(detectSpineVersion(file), name).resolves.toMatchObject({
         raw: fixture.editorVersion,
         majorMinor: version,
         supported: true,
+      });
+    }
+  });
+
+  it("3.5 JSON、Atlas、PNG 逐文件固定到同一官方 commit 与 SHA-256", () => {
+    const fixture = sources.fixtures["3.5"]!;
+    expect(Object.keys(fixture.files).sort()).toEqual([
+      "spineboy-pma.atlas",
+      "spineboy-pma.png",
+      "spineboy.json",
+    ]);
+    for (const record of Object.values(fixture.files)) {
+      expect(record).toEqual({
+        source: expect.stringContaining(`/${fixture.revision}/examples/spineboy/export/`),
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
     }
   });
