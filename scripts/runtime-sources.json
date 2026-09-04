@@ -72,8 +72,26 @@
       "archiveSha256": "6d955be39f6898cfaeec2b9a0e0f475c8437f8d550eedf9ef618937eadf043eb",
       "entry": "lib/spine/runtime-3_7.ts",
       "vendorDirectory": "vendor/spine-runtime-3.7",
-      "build": null,
-      "buildArtifacts": null,
+      "build": {
+        "sourceDirectory": "spine-ts",
+        "typescript": "2.8.4",
+        "offscreencanvasTypes": null,
+        "tsconfig": "tsconfig.webgl.json",
+        "outputDirectory": "build"
+      },
+      "buildArtifacts": {
+        "spine-webgl.js": {
+          "upstreamSha256": "074079ce08c0ad643578da8ec17dfe7e1e5d7ec7065106b05cd4cc703dca9c68",
+          "sha256": "31c1cbd67be62e2d6488738a24cd2b3b56ced097f4a79597b799e1bffb0104ed"
+        },
+        "spine-webgl.d.ts": {
+          "upstreamSha256": "e2cbaf4f4fc1f19f96b43aa3a89be8290ac0f07f0a53f7fd731f5e18753b3bdf",
+          "sha256": "fe099742c729c0f76ccdd7ca6fe30930e9c5318d713a34314483bc59f1e1e6aa"
+        },
+        "spine-webgl.js.map": {
+          "sha256": "96569cbd564b27efacad9d134c3b7b01919668f7decf29c67b765e1f47d5378d"
+        }
+      },
       "licenseSha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
     },
     "3.8": {

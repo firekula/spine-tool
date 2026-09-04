@@ -5,7 +5,7 @@ import JSZip from "jszip";
 import { collectPageErrors } from "./fixtures";
 
 const fixtureRoot = resolve(import.meta.dirname, "../fixtures/official-spine");
-const versions = ["3.5", "3.6", "3.8", "4.0", "4.1", "4.2"] as const;
+const versions = ["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2"] as const;
 
 function fixtureFiles(version: typeof versions[number], kind: "json" | "skel"): string[] {
   const directory = resolve(fixtureRoot, version);
@@ -22,20 +22,20 @@ async function importOfficialFixture(
   kind: "json" | "skel",
 ): Promise<void> {
   await page.locator('input[type="file"]').setInputFiles(fixtureFiles(version, kind));
-  if (version === "3.5" || version === "3.6" || version === "3.8") {
+  if (version === "3.5" || version === "3.6" || version === "3.7" || version === "3.8") {
     await expect(page.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toBeChecked();
     await page.getByRole("button", { name: "确认 Alpha 模式并加载预览" }).click();
   }
 }
 
 for (const version of versions) {
-  const kinds = version === "3.5" || version === "3.6"
+  const kinds = version === "3.5" || version === "3.6" || version === "3.7"
     ? ["json"] as const
     : ["json", "skel"] as const;
   for (const kind of kinds) {
     test(`官方 Spine ${version} ${kind.toUpperCase()} 由对应 bridge 加载`, async ({ page }) => {
       const errors = collectPageErrors(page);
-      if (version === "3.5" || version === "3.6") {
+      if (version === "3.5" || version === "3.6" || version === "3.7") {
         await page.addInitScript(() => {
           const original = WebGLRenderingContext.prototype.blendFunc;
           (window as unknown as { __spineBlendCalls: number[][] }).__spineBlendCalls = [];
@@ -51,7 +51,7 @@ for (const version of versions) {
       await expect(page.getByRole("status").first()).toContainText(`Spine ${version} · 预览已就绪`);
       await expect(page.getByRole("region", { name: "Spine 预览交互区域" })).toBeVisible();
       await expect(page.getByRole("combobox", { name: "Runtime 版本" })).toBeHidden();
-      if (version === "3.5" || version === "3.6") {
+      if (version === "3.5" || version === "3.6" || version === "3.7") {
         await page.getByRole("button", { name: "适配画面" }).click();
         await expect(page.getByRole("region", { name: "动画列表" }).getByRole("button", { name: "idle" })).toBeVisible();
         await page.getByRole("tab", { name: "皮肤" }).click();
@@ -83,14 +83,18 @@ for (const version of versions) {
   }
 }
 
-for (const version of ["3.5", "3.6"] as const) {
+for (const version of ["3.5", "3.6", "3.7"] as const) {
   test(`Spine ${version} SKEL 明确报告 JSON-only 能力限制且不跨版本读取`, async ({ page }) => {
     const directory = resolve(fixtureRoot, version);
     const encodeString = (value: string): Buffer => {
       const content = Buffer.from(value);
       return Buffer.concat([Buffer.from([content.length + 1]), content]);
     };
-    const editorVersion = version === "3.5" ? "3.5.03-beta" : "3.6.32";
+    const editorVersion = {
+      "3.5": "3.5.03-beta",
+      "3.6": "3.6.32",
+      "3.7": "3.7.90",
+    }[version];
     const skel = Buffer.concat([encodeString("fixture-hash"), encodeString(editorVersion)]);
 
     await page.goto("/");

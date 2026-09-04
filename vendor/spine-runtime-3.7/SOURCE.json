@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/EsotericSoftware/spine-runtimes.git",
+  "branch": "3.7",
+  "commit": "9639bcc81722d7178fd9d1cdc1a3d55a4c91f989",
+  "sourcePath": "spine-ts",
+  "sourceArchiveSha256": "6d955be39f6898cfaeec2b9a0e0f475c8437f8d550eedf9ef618937eadf043eb",
+  "build": {
+    "typescript": "2.8.4",
+    "offscreencanvasTypes": null,
+    "command": "npx --yes --package typescript@2.8.4 tsc -p tsconfig.webgl.json",
+    "javascriptSha256BeforeEsmBoundary": "074079ce08c0ad643578da8ec17dfe7e1e5d7ec7065106b05cd4cc703dca9c68",
+    "declarationsSha256BeforeEsmBoundary": "e2cbaf4f4fc1f19f96b43aa3a89be8290ac0f07f0a53f7fd731f5e18753b3bdf",
+    "javascriptSha256": "31c1cbd67be62e2d6488738a24cd2b3b56ced097f4a79597b799e1bffb0104ed",
+    "declarationsSha256": "fe099742c729c0f76ccdd7ca6fe30930e9c5318d713a34314483bc59f1e1e6aa",
+    "sourceMapSha256": "96569cbd564b27efacad9d134c3b7b01919668f7decf29c67b765e1f47d5378d",
+    "esmBoundary": "The generated namespace build is unchanged before a trailing ESM export and matching declaration."
+  },
+  "license": {
+    "path": "LICENSE",
+    "sha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
+  }
+}

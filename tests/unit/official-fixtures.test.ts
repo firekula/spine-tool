@@ -78,6 +78,26 @@ describe("官方 Spine fixtures", () => {
     }
   });
 
+  it("3.7 JSON、Atlas、PNG 逐文件固定到 3.7 官方 commit 与 SHA-256", () => {
+    const fixture = sources.fixtures["3.7"];
+    expect(fixture).toBeDefined();
+    expect(fixture?.revision).toBe("9639bcc81722d7178fd9d1cdc1a3d55a4c91f989");
+    expect(fixture?.editorVersion).toBe("3.7.90");
+    expect(fixture?.alphaMode).toBe("premultiplied");
+    expect(fixture?.skeletons).toEqual({ json: "spineboy-ess.json" });
+    expect(Object.keys(fixture?.files ?? {}).sort()).toEqual([
+      "spineboy-ess.json",
+      "spineboy-pma.atlas",
+      "spineboy-pma.png",
+    ]);
+    for (const record of Object.values(fixture?.files ?? {})) {
+      expect(record).toEqual({
+        source: expect.stringContaining(`/${fixture?.revision}/examples/spineboy/export/`),
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+    }
+  });
+
   it("4.2 Atlas 的每个 Region 都能生成合法恢复计划", () => {
     const atlas = parseAtlas(readFileSync(resolve(fixtureRoot, "4.2/spineboy-pma.atlas"), "utf8"));
     const pages = new Map(atlas.pages.map((page) => [page.name, page]));
