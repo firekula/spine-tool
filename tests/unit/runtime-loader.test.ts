@@ -33,6 +33,7 @@ const EXPECTED_SOURCES = {
   "4.0": { kind: "npm", version: "4.0.31", revision: "4.0.31" },
   "4.1": { kind: "npm", version: "4.1.56", revision: "4.1.56" },
   "4.2": { kind: "npm", version: "4.2.120", revision: "4.2.120" },
+  "4.3": { kind: "npm", version: "4.3.9", revision: "4.3.9" },
 } as const;
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -68,7 +69,7 @@ afterEach(() => {
 });
 
 describe("loadRuntimeModule", () => {
-  it.each(["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2"] as const)(
+  it.each(["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3"] as const)(
     "为 %s 加载可实例化的对应官方 Runtime",
     async (version) => {
       const module = await loadRuntimeModule(version);
@@ -95,17 +96,13 @@ describe("loadRuntimeModule", () => {
     },
   );
 
-  it("为七个版本保留互不共享的 Skeleton 与 SkeletonData core 身份", async () => {
+  it("为八个版本保留互不共享的 Skeleton 与 SkeletonData core 身份", async () => {
     const modules = await Promise.all(
-      (["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2"] as const).map(loadRuntimeModule),
+      (["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3"] as const).map(loadRuntimeModule),
     );
 
-    expect(new Set(modules.map((module) => module.runtimeConstructors.Skeleton)).size).toBe(7);
-    expect(new Set(modules.map((module) => module.runtimeConstructors.SkeletonData)).size).toBe(7);
-  });
-
-  it.each(["4.3"] as const)("为尚未安装的 %s Runtime 返回明确错误", async (version) => {
-    await expect(loadRuntimeModule(version)).rejects.toThrow(`Spine ${version} 对应 Runtime 尚未安装`);
+    expect(new Set(modules.map((module) => module.runtimeConstructors.Skeleton)).size).toBe(8);
+    expect(new Set(modules.map((module) => module.runtimeConstructors.SkeletonData)).size).toBe(8);
   });
 });
 
@@ -185,7 +182,7 @@ describe("Runtime 资产验证", () => {
 
     expect(output).toContain("3.8: 已从固定归档与 patch 重建 Runtime");
     expect(output).toContain("已验证 8 条 Spine Runtime 固定来源");
-    expect(output).toContain("已验证 7 个隔离 Spine Runtime chunk");
+    expect(output).toContain("已验证 8 个隔离 Spine Runtime chunk");
   });
 
   it("快速验证明确标记未进行严格重建", () => {
@@ -797,6 +794,7 @@ describe("createRuntimeBridge", () => {
     { version: "4.0", attachmentPath: "", attachmentRegionName: "atlas/path-40" },
     { version: "4.1", attachmentPath: "atlas/path-41", attachmentRegionName: "ignored-region" },
     { version: "4.2", attachmentPath: "atlas/path-42", attachmentRegionName: undefined },
+    { version: "4.3", attachmentPath: "atlas/path-43", attachmentRegionName: undefined },
   ] as const)("$version 元数据使用 RegionAttachment 的真实 Atlas 路径而不是 skin alias key", async ({
     version,
     attachmentPath,
@@ -1089,6 +1087,40 @@ describe("createRuntimeBridge", () => {
       ].join("\n"),
       textureObjectUrls: new Map([["a.png", "blob:a"], ["b.png", "blob:b"]]),
     })).rejects.toThrow(/PMA|预乘/);
+  });
+
+  it("4.3 按每页 Atlas pma 创建纹理并忽略 3.x 显式 Alpha 选择", async () => {
+    installImmediateImages();
+    vi.spyOn(URL, "revokeObjectURL");
+    const harness = createHarness({ pages: [{ name: "a.png" }, { name: "b.png" }] });
+    const texturePremultipliedAlpha: boolean[] = [];
+    Object.assign(harness.runtime, {
+      usesPerPagePremultipliedAlpha: true,
+      createTexture: (
+        _context: WebGLRenderingContext,
+        _image: HTMLImageElement,
+        premultipliedAlpha: boolean,
+      ) => {
+        texturePremultipliedAlpha.push(premultipliedAlpha);
+        return { dispose: () => undefined };
+      },
+      drawSkeleton: (renderer: { drawSkeleton(skeleton: unknown): void }, skeleton: unknown) => {
+        renderer.drawSkeleton(skeleton);
+      },
+    });
+    const bridge = createRuntimeBridge("4.3", harness.runtime);
+
+    await expect(bridge.load({
+      ...harness.input,
+      alphaMode: "straight",
+      atlasText: [
+        "a.png", "size: 2,2", "filter: Linear,Linear", "repeat: none", "pma: true", "",
+        "b.png", "size: 2,2", "filter: Linear,Linear", "repeat: none", "pma: false", "",
+      ].join("\n"),
+      textureObjectUrls: new Map([["a.png", "blob:a"], ["b.png", "blob:b"]]),
+    })).resolves.toBeDefined();
+
+    expect(texturePremultipliedAlpha).toEqual([true, false]);
   });
 
   it("支持暂停、seek 和组合皮肤", async () => {

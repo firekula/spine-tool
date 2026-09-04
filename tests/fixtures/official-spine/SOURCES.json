@@ -111,6 +111,32 @@
         "spineboy-pma.atlas": "a53dd09fa8d304b395062c0a35a4c3952e979dda00e74b9cd95a5bc264cd6d5d",
         "spineboy-pma.png": "eb8a9b9f105517acda7ab5c9961f6c487a6bc2ac28a6a123f6303a6af805dd3f"
       }
+    },
+    "4.3": {
+      "revision": "04def9c6229d16155e1ab1e9ca92f643c0d794d1",
+      "editorVersion": "4.3.75-beta",
+      "skeletons": {
+        "json": "spineboy-ess.json",
+        "skel": "spineboy-ess.skel"
+      },
+      "files": {
+        "spineboy-ess.json": {
+          "source": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/04def9c6229d16155e1ab1e9ca92f643c0d794d1/examples/spineboy/export/spineboy-ess.json",
+          "sha256": "da21eb38c5c1bb5fa5d8569d6ffeec9e4f1976ee4c260bcc709c6f32ade1c9b9"
+        },
+        "spineboy-ess.skel": {
+          "source": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/04def9c6229d16155e1ab1e9ca92f643c0d794d1/examples/spineboy/export/spineboy-ess.skel",
+          "sha256": "3bc8ee724526458d7b0b745bd7a3d851d61a8063e4fa4b09afa9ca4825568156"
+        },
+        "spineboy-pma.atlas": {
+          "source": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/04def9c6229d16155e1ab1e9ca92f643c0d794d1/examples/spineboy/export/spineboy-pma.atlas",
+          "sha256": "b04b98b6ac9e28ee1cf660e4d96d6c7df21fbd5d47aa2382c84865ff18795db8"
+        },
+        "spineboy-pma.png": {
+          "source": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/04def9c6229d16155e1ab1e9ca92f643c0d794d1/examples/spineboy/export/spineboy-pma.png",
+          "sha256": "47bab0de0518a5b7daa829d953439972c5d43b78fc31b40e1557a2ed625a00b5"
+        }
+      }
     }
   },
   "sourceUrlPattern": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/{revision}/examples/spineboy/export/{filename}"

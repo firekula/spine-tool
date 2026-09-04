@@ -5,7 +5,7 @@ import JSZip from "jszip";
 import { collectPageErrors } from "./fixtures";
 
 const fixtureRoot = resolve(import.meta.dirname, "../fixtures/official-spine");
-const versions = ["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2"] as const;
+const versions = ["3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3"] as const;
 
 function fixtureFiles(version: typeof versions[number], kind: "json" | "skel"): string[] {
   const directory = resolve(fixtureRoot, version);

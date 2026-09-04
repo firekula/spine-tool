@@ -111,4 +111,27 @@ describe("官方 Spine fixtures", () => {
     }
     expect(failures).toEqual([]);
   });
+
+  it("4.3 JSON、SKEL、Atlas、PNG 逐文件固定到 spine-ts-4.3.9 官方 tag commit", () => {
+    const fixture = sources.fixtures["4.3"];
+    expect(fixture).toBeDefined();
+    expect(fixture?.revision).toBe("04def9c6229d16155e1ab1e9ca92f643c0d794d1");
+    expect(fixture?.editorVersion).toBe("4.3.75-beta");
+    expect(fixture?.skeletons).toEqual({
+      json: "spineboy-ess.json",
+      skel: "spineboy-ess.skel",
+    });
+    expect(Object.keys(fixture?.files ?? {}).sort()).toEqual([
+      "spineboy-ess.json",
+      "spineboy-ess.skel",
+      "spineboy-pma.atlas",
+      "spineboy-pma.png",
+    ]);
+    for (const record of Object.values(fixture?.files ?? {})) {
+      expect(record).toEqual({
+        source: expect.stringContaining(`/${fixture?.revision}/examples/spineboy/export/`),
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+    }
+  });
 });

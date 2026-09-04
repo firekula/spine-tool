@@ -9,6 +9,7 @@ const RUNTIME_LOADERS: Partial<Record<SupportedSpineVersion, () => Promise<Spine
   "4.0": () => import("./runtime-4_0"),
   "4.1": () => import("./runtime-4_1"),
   "4.2": () => import("./runtime-4_2"),
+  "4.3": () => import("./runtime-4_3"),
 };
 
 export async function loadRuntimeModule(version: SupportedSpineVersion): Promise<SpineRuntimeModule> {

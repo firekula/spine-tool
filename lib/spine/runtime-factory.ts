@@ -141,6 +141,21 @@ export interface RuntimeAdapter {
   };
   enumerateAttachments(skin: RuntimeSkin): RuntimeSkinAttachment[];
   addSkin(target: RuntimeSkin, source: RuntimeSkin): void;
+  createTexture?(
+    context: WebGLRenderingContext,
+    image: HTMLImageElement,
+    premultipliedAlpha: boolean,
+    useMipMaps: boolean,
+  ): { dispose?(): void };
+  drawSkeleton?(
+    renderer: RuntimeRenderer,
+    skeleton: RuntimeSkeleton,
+    premultipliedAlpha: boolean,
+  ): void;
+  usesPerPagePremultipliedAlpha?: boolean;
+  setSlotsToSetupPose?(skeleton: RuntimeSkeleton): void;
+  getSlotAttachment?(slot: RuntimeSlot): unknown;
+  setSlotAttachment?(slot: RuntimeSlot, attachment: unknown): void;
   updateSkeleton(skeleton: RuntimeSkeleton, delta: number): void;
   updateWorldTransform(skeleton: RuntimeSkeleton): void;
 }
@@ -282,10 +297,24 @@ function pageUsesMipMaps(page: RuntimeAtlasPage, config: AtlasPageConfig | undef
   return config?.useMipMaps ?? false;
 }
 
+function createTexture(
+  adapter: RuntimeAdapter,
+  context: WebGLRenderingContext,
+  image: HTMLImageElement,
+  premultipliedAlpha: boolean,
+  useMipMaps: boolean,
+): { dispose?(): void } {
+  if (adapter.createTexture) {
+    return adapter.createTexture(context, image, premultipliedAlpha, useMipMaps);
+  }
+  return new adapter.constructors.GLTexture(context, image, useMipMaps);
+}
+
 function atlasPremultipliedAlpha(
   atlas: RuntimeAtlas,
   configs: AtlasPageConfig[],
   explicit?: boolean,
+  allowMixed = false,
 ): boolean {
   if (explicit !== undefined) return explicit;
   const values = atlas.pages.map((page) => (
@@ -293,7 +322,7 @@ function atlasPremultipliedAlpha(
       ? page.pma
       : pageConfig(configs, page.name)?.premultipliedAlpha ?? false
   ));
-  if (new Set(values).size > 1) {
+  if (!allowMixed && new Set(values).size > 1) {
     throw new Error("Atlas 包含混合 PMA（预乘 Alpha）纹理页，当前 Spine renderer 只能为整具 skeleton 使用一种混合模式");
   }
   return values[0] ?? false;
@@ -318,15 +347,19 @@ async function createAtlas(
   }));
   if (cancellation.isCancelled()) throw loadCancelledError();
 
-  const { GLTexture, TextureAtlas } = adapter.constructors;
+  const { TextureAtlas } = adapter.constructors;
   if (adapter.atlasMode === "constructor-loader") {
     const createdTextures: Array<{ dispose?(): void }> = [];
     let atlas: RuntimeAtlas | null = null;
     try {
       atlas = new TextureAtlas(input.atlasText, (pageName: string) => {
-        const texture = new GLTexture(
+        const texture = createTexture(
+          adapter,
           context,
           textureForPage(images, pageName),
+          explicitPremultipliedAlpha
+            ?? pageConfig(configs, pageName)?.premultipliedAlpha
+            ?? false,
           pageConfig(configs, pageName)?.useMipMaps ?? false,
         );
         createdTextures.push(texture);
@@ -344,11 +377,22 @@ async function createAtlas(
   const atlas = new TextureAtlas(input.atlasText);
   const createdTextures: Array<{ dispose?(): void }> = [];
   try {
+    const premultipliedAlpha = atlasPremultipliedAlpha(
+      atlas,
+      configs,
+      explicitPremultipliedAlpha,
+      adapter.usesPerPagePremultipliedAlpha,
+    );
     for (const page of atlas.pages) {
-      const texture = new GLTexture(
+      const config = pageConfig(configs, page.name);
+      const texture = createTexture(
+        adapter,
         context,
         textureForPage(images, page.name),
-        pageUsesMipMaps(page, pageConfig(configs, page.name)),
+        typeof page.pma === "boolean"
+          ? page.pma
+          : config?.premultipliedAlpha ?? premultipliedAlpha,
+        pageUsesMipMaps(page, config),
       );
       createdTextures.push(texture);
       if (page.setTexture) page.setTexture(texture);
@@ -356,7 +400,7 @@ async function createAtlas(
     }
     return {
       atlas,
-      premultipliedAlpha: atlasPremultipliedAlpha(atlas, configs, explicitPremultipliedAlpha),
+      premultipliedAlpha,
     };
   } catch (error) {
     // 4.0 TextureAtlas.dispose assumes every page already has a texture, so
@@ -562,7 +606,8 @@ class RuntimeBridge implements SpineRuntimeBridge {
       for (const skin of skins) this.adapter.addSkin(composite, skin);
       this.skeleton.setSkin(composite);
     }
-    this.skeleton.setSlotsToSetupPose();
+    if (this.adapter.setSlotsToSetupPose) this.adapter.setSlotsToSetupPose(this.skeleton);
+    else this.skeleton.setSlotsToSetupPose();
   }
 
   setHiddenSlots(names: ReadonlySet<string>): void {
@@ -635,8 +680,12 @@ class RuntimeBridge implements SpineRuntimeBridge {
     const hiddenAttachments: Array<[RuntimeSlot, unknown]> = [];
     for (const slot of skeleton.slots) {
       if (this.hiddenSlots.has(slot.data.name)) {
-        hiddenAttachments.push([slot, slot.attachment]);
-        slot.attachment = null;
+        const attachment = this.adapter.getSlotAttachment
+          ? this.adapter.getSlotAttachment(slot)
+          : slot.attachment;
+        hiddenAttachments.push([slot, attachment]);
+        if (this.adapter.setSlotAttachment) this.adapter.setSlotAttachment(slot, null);
+        else slot.attachment = null;
       }
     }
     let rendererBegun = false;
@@ -649,12 +698,19 @@ class RuntimeBridge implements SpineRuntimeBridge {
       }
       renderer.begin();
       rendererBegun = true;
-      renderer.drawSkeleton(skeleton, this.premultipliedAlpha);
+      if (this.adapter.drawSkeleton) {
+        this.adapter.drawSkeleton(renderer, skeleton, this.premultipliedAlpha);
+      } else {
+        renderer.drawSkeleton(skeleton, this.premultipliedAlpha);
+      }
     } finally {
       try {
         if (rendererBegun) renderer.end();
       } finally {
-        for (const [slot, attachment] of hiddenAttachments) slot.attachment = attachment;
+        for (const [slot, attachment] of hiddenAttachments) {
+          if (this.adapter.setSlotAttachment) this.adapter.setSlotAttachment(slot, attachment);
+          else slot.attachment = attachment;
+        }
       }
     }
     return this.snapshot();
