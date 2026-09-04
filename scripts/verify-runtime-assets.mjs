@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
 
@@ -35,6 +35,28 @@ async function sha256(path) {
   return sha256Contents(await readFile(resolve(repositoryRoot, path)));
 }
 
+async function sha256Tree(path) {
+  const root = resolve(repositoryRoot, path);
+  const files = [];
+  async function walk(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const entryPath = join(directory, entry.name);
+      if (entry.isDirectory()) await walk(entryPath);
+      else if (entry.isFile()) files.push(entryPath);
+    }
+  }
+  await walk(root);
+  const treeHash = createHash("sha256");
+  for (const file of files.sort()) {
+    const relativePath = relative(root, file).split(sep).join("/");
+    treeHash.update(relativePath);
+    treeHash.update("\0");
+    treeHash.update(sha256Contents(await readFile(file)));
+    treeHash.update("\n");
+  }
+  return treeHash.digest("hex");
+}
+
 async function validateOptionalArchive(source) {
   if (!await pathExists(source.archivePath)) return;
   assert.ok(source.archiveSha256, `${source.archivePath} 存在但未固定 SHA-256`);
@@ -51,7 +73,9 @@ const packageLockPath = process.env.SPINE_RUNTIME_LOCKFILE
   ? resolve(process.env.SPINE_RUNTIME_LOCKFILE)
   : resolve(repositoryRoot, "package-lock.json");
 const packageLock = JSON.parse(await readFile(packageLockPath, "utf8"));
-const sourceManifest = await json("scripts/runtime-sources.json");
+const sourceManifest = await json(
+  process.env.SPINE_RUNTIME_SOURCE_MANIFEST ?? "scripts/runtime-sources.json",
+);
 const documentation = await readFile(resolve(repositoryRoot, "docs/runtime-versions.md"), "utf8");
 
 assert.equal(sourceManifest.schemaVersion, 1, "Runtime 来源清单 schemaVersion 不受支持");
@@ -119,6 +143,13 @@ for (const version of supportedVersions) {
   }
 
   assert.equal(source.kind, "npm", `${version} Runtime 来源 kind 无效`);
+  assert.equal(source.core.package, "@esotericsoftware/spine-core", `${version} core package 名称无效`);
+  assert.equal(source.core.version, source.version, `${version} core 来源版本与 webgl 不匹配`);
+  assert.match(
+    source.core.url,
+    /^https:\/\/registry\.npmjs\.org\/@esotericsoftware\/spine-core\/-\/spine-core-[^/]+\.tgz$/,
+    `${version} core 不是官方来源 URL`,
+  );
   const dependencyValue = `npm:${source.package}@${source.version}`;
   assert.equal(packageJson.dependencies[source.alias], dependencyValue, `${version} package.json alias 不匹配`);
   assert.equal(packageLock.packages[""].dependencies[source.alias], dependencyValue, `${version} lockfile 根 alias 不匹配`);
@@ -128,19 +159,27 @@ for (const version of supportedVersions) {
   assert.ok(lockedPackage, `${version} lockfile 缺少 alias package`);
   assert.equal(installedPackage.version, source.version, `${version} 已安装 package 版本不匹配`);
   assert.equal(lockedPackage.version, source.version, `${version} lockfile package 版本不匹配`);
-  assert.equal(installedPackage.dependencies["@esotericsoftware/spine-core"], source.version, `${version} 已安装 core 依赖版本不匹配`);
-  assert.equal(lockedPackage.dependencies["@esotericsoftware/spine-core"], source.version, `${version} lockfile core 依赖版本不匹配`);
+  assert.equal(installedPackage.dependencies[source.core.package], source.core.version, `${version} 已安装 core 依赖版本不匹配`);
+  assert.equal(lockedPackage.dependencies[source.core.package], source.core.version, `${version} lockfile core 依赖版本不匹配`);
   assert.equal(lockedPackage.resolved, source.url, `${version} lockfile resolved 不是固定官方 URL`);
   assert.equal(lockedPackage.integrity, source.integrity, `${version} lockfile integrity 不匹配`);
 
-  const nestedCore = `${packagePath}/node_modules/@esotericsoftware/spine-core`;
-  const rootCore = "node_modules/@esotericsoftware/spine-core";
+  const nestedCore = `${packagePath}/node_modules/${source.core.package}`;
+  const rootCore = `node_modules/${source.core.package}`;
   const corePath = await pathExists(`${nestedCore}/package.json`) ? nestedCore : rootCore;
   const corePackage = await json(`${corePath}/package.json`);
   const lockedCore = packageLock.packages[corePath];
   assert.ok(lockedCore, `${version} lockfile 缺少独立 core package`);
-  assert.equal(corePackage.version, source.version, `${version} 已安装 core 版本不匹配`);
-  assert.equal(lockedCore.version, source.version, `${version} lockfile core 版本不匹配`);
+  assert.equal(corePackage.name, source.core.package, `${version} 已安装 core package 名称不匹配`);
+  assert.equal(corePackage.version, source.core.version, `${version} 已安装 core 版本不匹配`);
+  assert.equal(lockedCore.version, source.core.version, `${version} lockfile core 版本不匹配`);
+  assert.equal(lockedCore.resolved, source.core.url, `${version} lockfile core resolved 不是固定官方 URL`);
+  assert.equal(lockedCore.integrity, source.core.integrity, `${version} lockfile core integrity 不匹配`);
+  for (const [artifact, expectedSha256] of Object.entries(source.core.buildArtifacts)) {
+    assert.equal(await sha256(`${corePath}/${artifact}`), expectedSha256, `${version} core ${artifact} SHA-256 不匹配`);
+  }
+  assert.equal(await sha256Tree(`${corePath}/dist`), source.core.distTreeSha256, `${version} core 完整 dist tree SHA-256 不匹配`);
+  assert.equal(await sha256(`${corePath}/LICENSE`), source.core.licenseSha256, `${version} core 许可证 SHA-256 不匹配`);
   coreDirectories.add(corePath);
   npmCorePaths.set(version, `/${corePath}/`);
 

@@ -159,6 +159,66 @@ describe("Runtime 资产验证", () => {
       rmSync(fixtureDirectory, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    ["非官方 resolved URL", "resolved", "https://example.invalid/spine-core-4.3.9.tgz"],
+    ["不精确的 SRI", "integrity", "sha512-tampered-core"],
+  ] as const)("拒绝 lockfile 中 core 的%s", (_label, field, invalidValue) => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-core-lock-"));
+    const fixtureLockfile = join(fixtureDirectory, "package-lock.json");
+    try {
+      const lockfile = JSON.parse(readFileSync(resolve(repositoryRoot, "package-lock.json"), "utf8"));
+      const corePath = "node_modules/@esotericsoftware/spine-webgl-4.3/node_modules/@esotericsoftware/spine-core";
+      lockfile.packages[corePath][field] = invalidValue;
+      writeFileSync(fixtureLockfile, JSON.stringify(lockfile));
+
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_LOCKFILE: fixtureLockfile },
+          stdio: "pipe",
+        },
+      )).toThrow();
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["关键构建产物", (manifest: any) => {
+      manifest.runtimes["4.3"].core.buildArtifacts["dist/index.js"] = "0".repeat(64);
+    }],
+    ["许可证", (manifest: any) => {
+      manifest.runtimes["4.3"].core.licenseSha256 = "0".repeat(64);
+    }],
+    ["完整 dist tree", (manifest: any) => {
+      manifest.runtimes["4.3"].core.distTreeSha256 = "0".repeat(64);
+    }],
+  ] as const)("拒绝 core 的%s SHA-256 不匹配", (_label, tamper) => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "spine-runtime-core-source-"));
+    const fixtureManifest = join(fixtureDirectory, "runtime-sources.json");
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, "scripts/runtime-sources.json"), "utf8"));
+      tamper(manifest);
+      writeFileSync(fixtureManifest, JSON.stringify(manifest));
+
+      expect(() => execFileSync(
+        process.execPath,
+        [resolve(repositoryRoot, "scripts/verify-runtime-assets.mjs")],
+        {
+          cwd: repositoryRoot,
+          encoding: "utf8",
+          env: { ...process.env, SPINE_RUNTIME_SOURCE_MANIFEST: fixtureManifest },
+          stdio: "pipe",
+        },
+      )).toThrow();
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
 });
 
 interface HarnessOptions {

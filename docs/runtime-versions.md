@@ -25,7 +25,7 @@
 - `vendor/spine-runtime-3.8/LICENSE` 是 3.8 commit 中 `spine-ts/LICENSE` 的未改写副本（SHA-256 `6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39`）。
 - `public/licenses/SPINE-RUNTIMES-LICENSE.txt` 是 4.2.120/4.3.9 官方 npm 包 `LICENSE` 的未改写副本（SHA-256 `435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e`）；4.0.31 与 4.1.56 自身的官方 LICENSE 也随各自 npm 包进入依赖树。
 
-运行 `npm run verify-runtime-assets` 会校验八条来源记录、package alias、package-lock 的官方 `resolved`/`integrity`、已安装 package 与 core 版本、官方构建产物 hash、vendor `SOURCE.json`/ESM 边界、许可副本，以及一次不落盘的 Vite 构建中所有已集成动态 chunk 的实际模块来源和 core 隔离。未集成版本只报告“来源已固定（Runtime 待集成）”，不会声称不存在的构建产物或 chunk 已验证。
+运行 `npm run verify-runtime-assets` 会校验八条来源记录、package alias、package-lock 中 webgl/core 各自的官方 `resolved`/`integrity`、已安装 package 与 core 版本、关键入口及 core 完整 `dist` tree 的 hash、webgl/core LICENSE hash、vendor `SOURCE.json`/ESM 边界，以及一次不落盘的 Vite 构建中所有已集成动态 chunk 的实际模块来源和 core 隔离。未集成版本只报告“来源已固定（Runtime 待集成）”，不会声称不存在的构建产物或 chunk 已验证。
 
 对 4.x，验证脚本还会要求 lockfile 的 `resolved` 精确等于表中的官方 registry tarball URL，并要求完整 SRI 分别为：
 
@@ -33,5 +33,12 @@
 - 4.1.56：`sha512-LNr/X4B81/rC96mzFV+L5LPnqaIj1v3RBCKTagmFlAd/2MtXcxwEatIQVPq487NigFwlrkvmxQuMpl1TRf3xxw==`
 - 4.2.120：`sha512-xhITm18dZ6DclPaI1jEiTVOoXYQASsubbDEs3Ik1AjmVSXdNFtvdvzLVwhPQ8eHu1OXsxtWfuW+wpGHib8V4hw==`
 - 4.3.9：`sha512-eAcqxurSXyGeQg9RFlqSUOqEiMYQcKsKKgcxzNwzcu18G7tcUZMcX7cB5zkN1mlfxtuGtZVx5bmGYSlUBUTrkQ==`
+
+各 alias 使用的 `@esotericsoftware/spine-core` 也在来源清单中单独固定官方 tarball URL、完整 SRI、入口文件 SHA-256、完整 `dist` tree SHA-256 与 LICENSE SHA-256。core SRI 分别为：
+
+- 4.0.31：`sha512-SiP87Xudw8qfg6t1Gv4NVoqP+Tw0eaCj1ApS+GXLdCvb/i5FNQevqEt4RgEvD8j1vJy+WVriPLMJYQSdaSehgA==`
+- 4.1.56：`sha512-sJbqIof+yE7LbkImbJt2cHfYcGBqadABttx8RY3ggu4JCa0sZLGdh+tWwe0+aRoN/91VI0rGSgG16fmkZ7Hc8Q==`
+- 4.2.120：`sha512-X62MPnfiZTWok4Wk5Q5DqaAUBUFypKpb94IVd1W/j4eLHhg0HH3tve4HvIlkgxDpls2NokHaAtzjxX12rJknOA==`
+- 4.3.9：`sha512-6Vb3DVM8ci2JoDdfpk191IkAMSvVm3YugfA6k27OcvO7f7DmZLrRKHQIICw+XbUVkGa/41VWG2dKZebpdmnvsg==`
 
 验证脚本不会执行 `npm pack`、访问 registry 或读取 npm cache。若仓库显式保留清单约定路径下的 `.tgz`，脚本会额外重算完整 SRI 与 SHA-256；未保留 tarball 时，已安装 package 的版本、核心构建产物与 LICENSE hash 仍必须和来源清单及 lockfile 同时一致，任一处不一致都会失败。

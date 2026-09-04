@@ -80,6 +80,18 @@
       "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.0.31.tgz",
       "archiveSha256": "fdfe7fc72b870a4da238f349634dd043390b5035dbce6782e7e4288adc6648a1",
       "integrity": "sha512-G6j31+caQJck/4UN8TVaTKnU0RPysI7ECMkCxcXBGsTmv98m0O5Wx18YgeIf//Bg8KAO+mZ/DmwzeScwGG9HPA==",
+      "core": {
+        "package": "@esotericsoftware/spine-core",
+        "version": "4.0.31",
+        "url": "https://registry.npmjs.org/@esotericsoftware/spine-core/-/spine-core-4.0.31.tgz",
+        "integrity": "sha512-SiP87Xudw8qfg6t1Gv4NVoqP+Tw0eaCj1ApS+GXLdCvb/i5FNQevqEt4RgEvD8j1vJy+WVriPLMJYQSdaSehgA==",
+        "buildArtifacts": {
+          "dist/index.js": "85795ebb7ba6acfb936c9ce466916efaf7619a0892cf47ab733677437e19de91",
+          "dist/index.d.ts": "936a7b7c55b81024c8bc640b870c1a240ea58725b3dcfc3e6812de32a27b6b14"
+        },
+        "distTreeSha256": "505a6fb150aae7850b78d9149b585a7d6be7abc1bc1b921175b655e96452d9bd",
+        "licenseSha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
+      },
       "entry": "lib/spine/runtime-4_0.ts",
       "buildArtifacts": {
         "dist/index.js": "8e13939caf2656702877c228e98a8f5bae1a61aeda7dcb62c45e0629a10a3211",
@@ -96,6 +108,18 @@
       "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.1.56.tgz",
       "archiveSha256": "fc9c0c579e7d91fcba007fabdc7ecced6fad70fca84bd6e3374a3a4f6ac23e4d",
       "integrity": "sha512-LNr/X4B81/rC96mzFV+L5LPnqaIj1v3RBCKTagmFlAd/2MtXcxwEatIQVPq487NigFwlrkvmxQuMpl1TRf3xxw==",
+      "core": {
+        "package": "@esotericsoftware/spine-core",
+        "version": "4.1.56",
+        "url": "https://registry.npmjs.org/@esotericsoftware/spine-core/-/spine-core-4.1.56.tgz",
+        "integrity": "sha512-sJbqIof+yE7LbkImbJt2cHfYcGBqadABttx8RY3ggu4JCa0sZLGdh+tWwe0+aRoN/91VI0rGSgG16fmkZ7Hc8Q==",
+        "buildArtifacts": {
+          "dist/index.js": "304265fcf038b9239c6c4ad1523b677194cd3d2a145ef96f9da799e8011f3ab2",
+          "dist/index.d.ts": "9b05f03c5763d97a1105ce1f164052486f0c851ba13000e3bb3275f1d2bf6300"
+        },
+        "distTreeSha256": "434bb7902a53acfe87e5dfaa81e233a614c8accf8477cb8cf923d42026746f1f",
+        "licenseSha256": "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39"
+      },
       "entry": "lib/spine/runtime-4_1.ts",
       "buildArtifacts": {
         "dist/index.js": "cfceae5ac042d22604bb17bdc65af72417614f8bd4289e267b253963119cd146",
@@ -112,6 +136,18 @@
       "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.2.120.tgz",
       "archiveSha256": "d1cfacd523602524ed497c8b794cd394a52cc8118cf6a680b4542585e1f36666",
       "integrity": "sha512-xhITm18dZ6DclPaI1jEiTVOoXYQASsubbDEs3Ik1AjmVSXdNFtvdvzLVwhPQ8eHu1OXsxtWfuW+wpGHib8V4hw==",
+      "core": {
+        "package": "@esotericsoftware/spine-core",
+        "version": "4.2.120",
+        "url": "https://registry.npmjs.org/@esotericsoftware/spine-core/-/spine-core-4.2.120.tgz",
+        "integrity": "sha512-X62MPnfiZTWok4Wk5Q5DqaAUBUFypKpb94IVd1W/j4eLHhg0HH3tve4HvIlkgxDpls2NokHaAtzjxX12rJknOA==",
+        "buildArtifacts": {
+          "dist/index.js": "c1f13f11260a95219d054aa313e557cb6a695c85cabf760e3a015ba8cf3eb745",
+          "dist/index.d.ts": "9b05f03c5763d97a1105ce1f164052486f0c851ba13000e3bb3275f1d2bf6300"
+        },
+        "distTreeSha256": "217e4ae113832ffeca25847c8a328c3bd42ecb82aa2929061dbaf9cc61ba26de",
+        "licenseSha256": "435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e"
+      },
       "entry": "lib/spine/runtime-4_2.ts",
       "buildArtifacts": {
         "dist/index.js": "ec7195512119f46b8e470dc91b7c6874efe2ab95e2648c5168c60d9213ffe561",
@@ -128,6 +164,18 @@
       "archivePath": "vendor/npm/esotericsoftware-spine-webgl-4.3.9.tgz",
       "archiveSha256": "fd8f6a38f9ab394e84801967209c304738c7ac84f1db9a7d8b0428203114b390",
       "integrity": "sha512-eAcqxurSXyGeQg9RFlqSUOqEiMYQcKsKKgcxzNwzcu18G7tcUZMcX7cB5zkN1mlfxtuGtZVx5bmGYSlUBUTrkQ==",
+      "core": {
+        "package": "@esotericsoftware/spine-core",
+        "version": "4.3.9",
+        "url": "https://registry.npmjs.org/@esotericsoftware/spine-core/-/spine-core-4.3.9.tgz",
+        "integrity": "sha512-6Vb3DVM8ci2JoDdfpk191IkAMSvVm3YugfA6k27OcvO7f7DmZLrRKHQIICw+XbUVkGa/41VWG2dKZebpdmnvsg==",
+        "buildArtifacts": {
+          "dist/index.js": "c09ea9b94d58a78da3bd93c4f992dfbe9463a8bb4559f6c114dfcc465d56395e",
+          "dist/index.d.ts": "cd74115d0d51ff423adfb4ec78ba844ed76a383fa2a31ff294e3f890ed772900"
+        },
+        "distTreeSha256": "ceaf04e1440ee8e9e95848d9927a54806a4f73a6a1b9c2299d39f24fc7bd68a3",
+        "licenseSha256": "435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e"
+      },
       "entry": "lib/spine/runtime-4_3.ts",
       "buildArtifacts": {
         "dist/index.js": "4fda161f006026a202308593df47c54fc78a742631e1f8d2bc15a262a93e68d3",
