@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import JSZip from "jszip";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -136,6 +138,84 @@ describe("离线包脚本", () => {
 
     expect(() => packageFixture(directory, join(directory, "offline.zip")))
       .toThrow(/Runtime.*SHA-256/);
+  });
+
+  it("拒绝精确 helper path 的内容被替换", () => {
+    const directory = makeOfflineBuild();
+    const helperPath = join(directory, "assets/runtime-factory-VHh44m-_.js");
+    writeFileSync(helperPath, "export {};\n");
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/Runtime.*SHA-256/);
+  });
+
+  it("拒绝符号链接，即使目标是安全的普通文件", () => {
+    const directory = makeOfflineBuild();
+    const targetPath = join(directory, "assets/safe-target.js");
+    const linkPath = join(directory, "assets/index-a.js");
+    writeFileSync(targetPath, 'export const target = "safe";\n');
+    rmSync(linkPath);
+    symlinkSync("safe-target.js", linkPath);
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/普通文件|符号链接/);
+  });
+
+  it.each([
+    ["反斜杠", "assets/helper\\runtime-5_0-a.js"],
+    ["控制字符", "assets/control-\u0001.js"],
+    ["全角 Unicode", "assets/ｒuntime-5_0-a.js"],
+    ["dotless Unicode", "assets/runtıme-5_0-a.js"],
+    ["后缀 token", "assets/helper-runtime-5_0-a.js"],
+    ["下划线 token", "assets/helper_runtime_xhm.js"],
+  ])("拒绝非规范路径或隐藏 Runtime 候选：%s", (_label, archivePath) => {
+    const directory = makeOfflineBuild();
+    const path = join(directory, archivePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "export {};\n");
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/归档路径|Runtime 文件集合/);
+  });
+
+  it("快照后磁盘替换不会改变已审计并写入 ZIP 的 bytes", async () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-snapshot-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    const targetPath = join(directory, "assets/index-a.js");
+    const safeContents = readFileSync(targetPath, "utf8");
+    const replacement = [
+      'const member = ["fe", "tch"].join("");',
+      "globalThis[member](String.fromCharCode(104,116,116,112,115,58,47,47,101,120,97,109,112,108,101,46,105,110,118,97,108,105,100));",
+    ].join("\n");
+    const moduleUrl = pathToFileURL(script).href;
+
+    execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { writeFile } from "node:fs/promises";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  afterSnapshot: () => writeFile(process.env.SPINE_OFFLINE_REPLACE_PATH, process.env.SPINE_OFFLINE_REPLACEMENT),",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+        SPINE_OFFLINE_REPLACE_PATH: targetPath,
+        SPINE_OFFLINE_REPLACEMENT: replacement,
+        SPINE_OFFLINE_SKIP_BUILD: "1",
+      },
+      stdio: "pipe",
+    });
+
+    expect(readFileSync(targetPath, "utf8")).toBe(replacement);
+    const zip = await JSZip.loadAsync(readFileSync(archive));
+    expect(await zip.file("assets/index-a.js")!.async("string")).toBe(safeContents);
   });
 
   it.each([

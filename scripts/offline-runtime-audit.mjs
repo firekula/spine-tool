@@ -77,8 +77,11 @@ export const trustedOfflineRuntimeDescriptors = Object.freeze([
   }),
 ]);
 
-export const allowedOfflineRuntimeHelperPaths = Object.freeze([
-  "assets/runtime-factory-VHh44m-_.js",
+export const trustedOfflineRuntimeHelperDescriptors = Object.freeze([
+  Object.freeze({
+    path: "assets/runtime-factory-VHh44m-_.js",
+    sha256: "26fb7bee3b80ec751eb4cb77c73a8a7050dd408b3ad05f75cfbb7bfc5d78b298",
+  }),
 ]);
 
 const trustedDynamicJavaScript = new Map([
@@ -99,7 +102,17 @@ const trustedDynamicJavaScript = new Map([
     sha256,
     allowedStaticExternalUrls,
   }]),
+  ...trustedOfflineRuntimeHelperDescriptors.map(({ path, sha256 }) => [path, {
+    kind: "spine-runtime-helper",
+    sha256,
+    allowedStaticExternalUrls: [],
+  }]),
 ]);
+
+const trustedOfflineRuntimeArtifacts = new Map([
+  ...trustedOfflineRuntimeDescriptors,
+  ...trustedOfflineRuntimeHelperDescriptors,
+].map((descriptor) => [descriptor.path, descriptor]));
 
 function ensureAuditLength(contents, format) {
   if (contents.length > maxAuditLength) {
@@ -355,6 +368,12 @@ export function matchesTrustedOfflineRuntime(path, contents) {
   return trustedJavaScript(path, contents)?.kind === "spine-runtime";
 }
 
+export function matchesTrustedOfflineRuntimeArtifact(path, contents) {
+  const descriptor = trustedOfflineRuntimeArtifacts.get(path);
+  if (!descriptor) return false;
+  return createHash("sha256").update(contents).digest("hex") === descriptor.sha256;
+}
+
 function vitePreloadCallSignature(call) {
   if (call.arguments.length !== 2) return false;
   const url = unwrapExpression(call.arguments[0]);
@@ -362,7 +381,7 @@ function vitePreloadCallSignature(call) {
 }
 
 function allowsTrustedDynamicTarget(trust, category, call) {
-  if (trust?.kind === "spine-runtime") return true;
+  if (trust?.kind === "spine-runtime" || trust?.kind === "spine-runtime-helper") return true;
   return trust?.kind === "vite-modulepreload" && category === "fetch" && vitePreloadCallSignature(call);
 }
 
