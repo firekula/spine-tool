@@ -5,13 +5,17 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import JSZip from "jszip";
-import { externalRuntimeDependencies } from "./offline-runtime-audit.mjs";
+import {
+  allowedOfflineRuntimeHelperPaths,
+  externalRuntimeDependencies,
+  matchesTrustedOfflineRuntime,
+  trustedOfflineRuntimeDescriptors,
+} from "./offline-runtime-audit.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = resolve(process.env.SPINE_OFFLINE_DIST_DIR ?? resolve(repositoryRoot, "dist-offline"));
 const offlineEntry = "offline/index.html";
 const requiredLicense = "licenses/SPINE-RUNTIMES-LICENSE.txt";
-const requiredRuntimeChunks = ["3_5", "3_6", "3_7", "3_8", "4_0", "4_1", "4_2", "4_3"];
 const outputArchive = resolve(process.env.SPINE_OFFLINE_ARCHIVE ?? resolve(repositoryRoot, "spine-preview-export-offline.zip"));
 const execFileAsync = promisify(execFile);
 const zipEntryOptions = {
@@ -68,14 +72,32 @@ const archiveFiles = outputFiles.map((path) => {
   };
 }).sort((left, right) => left.archivePath < right.archivePath ? -1 : left.archivePath > right.archivePath ? 1 : 0);
 const archivePaths = new Set(archiveFiles.map(({ archivePath }) => archivePath));
+const archiveFilesByPath = new Map(archiveFiles.map((file) => [file.archivePath, file]));
 
 assert.ok(archivePaths.has("index.html"), "离线构建缺少 offline/index.html");
 assert.ok(archivePaths.has(requiredLicense), `离线构建缺少许可文件 ${requiredLicense}`);
-const runtimeChunkVersions = [...archivePaths]
-  .map((path) => /^assets\/runtime-([34]_[0-9])-[A-Za-z0-9_-]+\.js$/.exec(path)?.[1])
-  .filter(Boolean)
+assert.equal(trustedOfflineRuntimeDescriptors.length, 8, "离线 trusted index 必须精确包含八个 Runtime descriptor");
+const runtimeArtifactPaths = [...archivePaths]
+  .filter((path) => path.split("/").some((segment) => segment.toLowerCase().startsWith("runtime-")))
   .sort();
-assert.deepEqual(runtimeChunkVersions, requiredRuntimeChunks, "离线构建必须精确包含八个 Spine Runtime chunk");
+const expectedRuntimeArtifactPaths = [
+  ...trustedOfflineRuntimeDescriptors.map(({ path }) => path),
+  ...allowedOfflineRuntimeHelperPaths,
+].sort();
+assert.deepEqual(
+  runtimeArtifactPaths,
+  expectedRuntimeArtifactPaths,
+  "离线构建 Runtime 文件集合必须精确等于八个可信 entry 与显式 helper",
+);
+
+for (const descriptor of trustedOfflineRuntimeDescriptors) {
+  const file = archiveFilesByPath.get(descriptor.path);
+  assert.ok(file, `离线构建缺少 Spine ${descriptor.version.replace("_", ".")} Runtime：${descriptor.path}`);
+  assert.ok(
+    matchesTrustedOfflineRuntime(descriptor.path, await readFile(file.path)),
+    `离线构建 Spine ${descriptor.version.replace("_", ".")} Runtime 未命中 descriptor 的完整 path+SHA-256：${descriptor.path}`,
+  );
+}
 
 const remoteDependencies = [];
 for (const file of archiveFiles) {

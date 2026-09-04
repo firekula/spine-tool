@@ -10,6 +10,77 @@ const maxCanonicalizationPasses = 8;
 // A source, dependency, minifier, or shared-chunk change invalidates the exception.
 // Static URL allowances cover inert metadata/namespaces only; network sinks are
 // audited independently and still reject the same exact URL when executable.
+export const trustedOfflineRuntimeDescriptors = Object.freeze([
+  Object.freeze({
+    version: "3_5",
+    path: "assets/runtime-3_5-Bi8Jnn0Q.js",
+    sha256: "d56157c87cfd7fc95ad93c2a9dc2bf1ef68ca3069f942c88c16144799539912a",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/afdbbc2044fb56c762d4e2eb54b63b1bb9276a48/spine-ts",
+    ]),
+  }),
+  Object.freeze({
+    version: "3_6",
+    path: "assets/runtime-3_6-CLmbD_xL.js",
+    sha256: "af490ed903e2c97bb2aa213f36a8b9d3ac716fcb3e7573f622e6a70e010a6d29",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/654c20e5b0e523040b6366bbd1042510d2645134/spine-ts",
+    ]),
+  }),
+  Object.freeze({
+    version: "3_7",
+    path: "assets/runtime-3_7-2FCUw6u4.js",
+    sha256: "77117fe1a5e8ec9844ff6f301f78458c0c37dc4e04184382d37c428d6331448f",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/9639bcc81722d7178fd9d1cdc1a3d55a4c91f989/spine-ts",
+    ]),
+  }),
+  Object.freeze({
+    version: "3_8",
+    path: "assets/runtime-3_8-DGhdHgL6.js",
+    sha256: "7740adef09520057021b5fe058fc32eb45276f9115b0578918c26a05d73c4ac2",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
+    ]),
+  }),
+  Object.freeze({
+    version: "4_0",
+    path: "assets/runtime-4_0-COt9E0L2.js",
+    sha256: "77fc509156b348806d8083da5026d1e95498548b832a65ae55cb38ecf55950b0",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
+    ]),
+  }),
+  Object.freeze({
+    version: "4_1",
+    path: "assets/runtime-4_1-DTh0mXCj.js",
+    sha256: "19e07935cc8fa3379ca1956048a98083683def133870870a658475ca3dc01d46",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
+    ]),
+  }),
+  Object.freeze({
+    version: "4_2",
+    path: "assets/runtime-4_2-DCUIXHIn.js",
+    sha256: "31a111f14637a01dfb33eef7a9447e67564d960a7e42bbdaf894aa5b1d366ebe",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
+    ]),
+  }),
+  Object.freeze({
+    version: "4_3",
+    path: "assets/runtime-4_3-CyzD6Xgf.js",
+    sha256: "b6d01752e0deabaf55737fa1b91046f8cc570a012cabee1e1bce391205da264a",
+    allowedStaticExternalUrls: Object.freeze([
+      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz",
+    ]),
+  }),
+]);
+
+export const allowedOfflineRuntimeHelperPaths = Object.freeze([
+  "assets/runtime-factory-VHh44m-_.js",
+]);
+
 const trustedDynamicJavaScript = new Map([
   ["assets/index-YgmOeDMo.js", {
     kind: "vite-modulepreload",
@@ -23,62 +94,11 @@ const trustedDynamicJavaScript = new Map([
       "http://www.w3.org/1999/xhtml",
     ],
   }],
-  ["assets/runtime-3_5-Bi8Jnn0Q.js", {
+  ...trustedOfflineRuntimeDescriptors.map(({ path, sha256, allowedStaticExternalUrls }) => [path, {
     kind: "spine-runtime",
-    sha256: "d56157c87cfd7fc95ad93c2a9dc2bf1ef68ca3069f942c88c16144799539912a",
-    allowedStaticExternalUrls: [
-      "https://github.com/EsotericSoftware/spine-runtimes/tree/afdbbc2044fb56c762d4e2eb54b63b1bb9276a48/spine-ts",
-    ],
-  }],
-  ["assets/runtime-3_6-CLmbD_xL.js", {
-    kind: "spine-runtime",
-    sha256: "af490ed903e2c97bb2aa213f36a8b9d3ac716fcb3e7573f622e6a70e010a6d29",
-    allowedStaticExternalUrls: [
-      "https://github.com/EsotericSoftware/spine-runtimes/tree/654c20e5b0e523040b6366bbd1042510d2645134/spine-ts",
-    ],
-  }],
-  ["assets/runtime-3_7-2FCUw6u4.js", {
-    kind: "spine-runtime",
-    sha256: "77117fe1a5e8ec9844ff6f301f78458c0c37dc4e04184382d37c428d6331448f",
-    allowedStaticExternalUrls: [
-      "https://github.com/EsotericSoftware/spine-runtimes/tree/9639bcc81722d7178fd9d1cdc1a3d55a4c91f989/spine-ts",
-    ],
-  }],
-  ["assets/runtime-3_8-DGhdHgL6.js", {
-    kind: "spine-runtime",
-    sha256: "7740adef09520057021b5fe058fc32eb45276f9115b0578918c26a05d73c4ac2",
-    allowedStaticExternalUrls: [
-      "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
-    ],
-  }],
-  ["assets/runtime-4_0-COt9E0L2.js", {
-    kind: "spine-runtime",
-    sha256: "77fc509156b348806d8083da5026d1e95498548b832a65ae55cb38ecf55950b0",
-    allowedStaticExternalUrls: [
-      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
-    ],
-  }],
-  ["assets/runtime-4_1-DTh0mXCj.js", {
-    kind: "spine-runtime",
-    sha256: "19e07935cc8fa3379ca1956048a98083683def133870870a658475ca3dc01d46",
-    allowedStaticExternalUrls: [
-      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
-    ],
-  }],
-  ["assets/runtime-4_2-DCUIXHIn.js", {
-    kind: "spine-runtime",
-    sha256: "31a111f14637a01dfb33eef7a9447e67564d960a7e42bbdaf894aa5b1d366ebe",
-    allowedStaticExternalUrls: [
-      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
-    ],
-  }],
-  ["assets/runtime-4_3-CyzD6Xgf.js", {
-    kind: "spine-runtime",
-    sha256: "b6d01752e0deabaf55737fa1b91046f8cc570a012cabee1e1bce391205da264a",
-    allowedStaticExternalUrls: [
-      "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz",
-    ],
-  }],
+    sha256,
+    allowedStaticExternalUrls,
+  }]),
 ]);
 
 function ensureAuditLength(contents, format) {
@@ -329,6 +349,10 @@ function trustedJavaScript(path, contents) {
   if (!descriptor) return undefined;
   const digest = createHash("sha256").update(contents).digest("hex");
   return digest === descriptor.sha256 ? descriptor : undefined;
+}
+
+export function matchesTrustedOfflineRuntime(path, contents) {
+  return trustedJavaScript(path, contents)?.kind === "spine-runtime";
 }
 
 function vitePreloadCallSignature(call) {

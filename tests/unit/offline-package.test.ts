@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -37,11 +37,22 @@ function makeOfflineBuild(overrides: Partial<Record<"html" | "js" | "css", strin
   writeFileSync(join(directory, "offline/index.html"), overrides.html ?? '<p>离线中文说明</p><script type="module" src="../assets/index-a.js"></script>');
   writeFileSync(join(directory, "assets/index-a.js"), overrides.js ?? 'export const offline = "本地相对资源";');
   writeFileSync(join(directory, "assets/index-a.css"), overrides.css ?? "body { color: black; }");
-  for (const version of ["3_5", "3_6", "3_7", "3_8", "4_0", "4_1", "4_2", "4_3"]) {
-    writeFileSync(join(directory, `assets/runtime-${version}-a.js`), "export {};\n");
+  for (const name of readdirSync(join(verifiedBuildDirectory, "assets"))) {
+    if (!/^runtime-.*\.js$/.test(name)) continue;
+    cpSync(join(verifiedBuildDirectory, "assets", name), join(directory, "assets", name));
   }
-  writeFileSync(join(directory, "licenses/SPINE-RUNTIMES-LICENSE.txt"), "license\n");
+  cpSync(
+    join(verifiedBuildDirectory, "licenses/SPINE-RUNTIMES-LICENSE.txt"),
+    join(directory, "licenses/SPINE-RUNTIMES-LICENSE.txt"),
+  );
   return directory;
+}
+
+function runtimePath(directory: string, version: string) {
+  const runtimeName = readdirSync(join(directory, "assets"))
+    .find((name) => new RegExp(`^runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(name));
+  expect(runtimeName).toBeDefined();
+  return join(directory, "assets", runtimeName!);
 }
 
 function packageFixture(directory: string, archive: string) {
@@ -90,14 +101,58 @@ describe("离线包脚本", () => {
     const tamperedBuild = mkdtempSync(join(tmpdir(), `spine-offline-tampered-${version}-`));
     temporaryDirectories.push(tamperedBuild);
     cpSync(verifiedBuildDirectory, tamperedBuild, { recursive: true });
-    const runtimeName = readdirSync(join(tamperedBuild, "assets"))
-      .find((name) => new RegExp(`^runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(name));
-    expect(runtimeName).toBeDefined();
-    const runtimePath = join(tamperedBuild, "assets", runtimeName!);
-    writeFileSync(runtimePath, Buffer.concat([readFileSync(runtimePath), Buffer.from(" ")]));
+    const path = runtimePath(tamperedBuild, version);
+    writeFileSync(path, Buffer.concat([readFileSync(path), Buffer.from(" ")]));
 
     expect(() => packageFixture(tamperedBuild, join(tamperedBuild, "offline.zip")))
-      .toThrow(/远程运行依赖/);
+      .toThrow(/Runtime.*SHA-256/);
+  });
+
+  it.each(["3_5", "3_6", "3_7", "3_8", "4_0", "4_1", "4_2", "4_3"])(
+    "拒绝 Spine %s 预期同名 Runtime chunk 被干净 JavaScript 替换",
+    (version) => {
+      const directory = makeOfflineBuild();
+      writeFileSync(runtimePath(directory, version), "export {};\n");
+
+      expect(() => packageFixture(directory, join(directory, "offline.zip")))
+        .toThrow(/Runtime.*SHA-256/);
+    },
+  );
+
+  it("拒绝缺失任一预期 Runtime entry", () => {
+    const directory = makeOfflineBuild();
+    rmSync(runtimePath(directory, "3_8"));
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/Runtime 文件集合/);
+  });
+
+  it("即使启发式审计未识别混淆外联，也拒绝替换后的同名 Runtime", () => {
+    const directory = makeOfflineBuild();
+    writeFileSync(runtimePath(directory, "4_3"), [
+      'const member = ["fe", "tch"].join("");',
+      "globalThis[member](String.fromCharCode(104,116,116,112,115,58,47,47,101,120,97,109,112,108,101,46,105,110,118,97,108,105,100));",
+    ].join("\n"));
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/Runtime.*SHA-256/);
+  });
+
+  it.each([
+    ["未来主版本", "assets/runtime-5_0-a.js"],
+    ["双位次版本", "assets/runtime-3_10-a.js"],
+    ["禁止格式", "assets/runtime-xhm-a.js"],
+    ["嵌套 entry", "assets/nested/runtime-3_5-a.js"],
+    ["Runtime 命名目录", "assets/runtime-shadow/chunk.js"],
+    ["伪装 helper", "assets/runtime-factory-copy.js"],
+  ])("拒绝额外 Runtime 候选：%s", (_label, archivePath) => {
+    const directory = makeOfflineBuild();
+    const path = join(directory, archivePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "export {};\n");
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/Runtime 文件集合/);
   });
 
   it("拒绝所有受支持载体中的外部运行网络目标", () => {
