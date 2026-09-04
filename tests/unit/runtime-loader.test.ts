@@ -14,6 +14,11 @@ const EXPECTED_SOURCES = {
     version: "3.5",
     revision: "afdbbc2044fb56c762d4e2eb54b63b1bb9276a48",
   },
+  "3.6": {
+    kind: "git-vendor",
+    version: "3.6",
+    revision: "654c20e5b0e523040b6366bbd1042510d2645134",
+  },
   "3.8": {
     kind: "git-vendor",
     version: "3.8",
@@ -32,14 +37,17 @@ afterEach(() => {
 });
 
 describe("loadRuntimeModule", () => {
-  it.each(["3.5", "3.8", "4.0", "4.1", "4.2"] as const)(
+  it.each(["3.5", "3.6", "3.8", "4.0", "4.1", "4.2"] as const)(
     "为 %s 加载可实例化的对应官方 Runtime",
     async (version) => {
       const module = await loadRuntimeModule(version);
 
       expect(module.version).toBe(version);
       expect(module.source).toMatchObject(EXPECTED_SOURCES[version]);
-      expect(module.capabilities).toEqual({ skeletonJson: true, skeletonBinary: version !== "3.5" });
+      expect(module.capabilities).toEqual({
+        skeletonJson: true,
+        skeletonBinary: version !== "3.5" && version !== "3.6",
+      });
       expect(module.createBridge).toEqual(expect.any(Function));
 
       const skeletonData = new module.runtimeConstructors.SkeletonData();
@@ -56,15 +64,16 @@ describe("loadRuntimeModule", () => {
     },
   );
 
-  it("为五个版本保留互不共享的 Skeleton core 身份", async () => {
+  it("为六个版本保留互不共享的 Skeleton 与 SkeletonData core 身份", async () => {
     const modules = await Promise.all(
-      (["3.5", "3.8", "4.0", "4.1", "4.2"] as const).map(loadRuntimeModule),
+      (["3.5", "3.6", "3.8", "4.0", "4.1", "4.2"] as const).map(loadRuntimeModule),
     );
 
-    expect(new Set(modules.map((module) => module.runtimeConstructors.Skeleton)).size).toBe(5);
+    expect(new Set(modules.map((module) => module.runtimeConstructors.Skeleton)).size).toBe(6);
+    expect(new Set(modules.map((module) => module.runtimeConstructors.SkeletonData)).size).toBe(6);
   });
 
-  it.each(["3.6", "3.7", "4.3"] as const)("为尚未安装的 %s Runtime 返回明确错误", async (version) => {
+  it.each(["3.7", "4.3"] as const)("为尚未安装的 %s Runtime 返回明确错误", async (version) => {
     await expect(loadRuntimeModule(version)).rejects.toThrow(`Spine ${version} 对应 Runtime 尚未安装`);
   });
 });
@@ -136,7 +145,7 @@ describe("Runtime 资产验证", () => {
     );
 
     expect(output).toContain("已验证 8 条 Spine Runtime 固定来源");
-    expect(output).toContain("已验证 5 个隔离 Spine Runtime chunk");
+    expect(output).toContain("已验证 6 个隔离 Spine Runtime chunk");
   });
 
   it.each([
@@ -586,7 +595,7 @@ describe("createRuntimeBridge", () => {
     expect(harness.events).toContain("skeleton.skin:bridge-composite");
   });
 
-  it("JSON-only adapter 对 SKEL 返回结构化能力错误且不触碰 WebGL", async () => {
+  it.each(["3.5", "3.6"] as const)("Spine %s JSON-only adapter 对 SKEL 返回结构化能力错误且不触碰 WebGL", async (version) => {
     const harness = createHarness();
     const getContext = vi.fn();
     const jsonOnlyRuntime = {
@@ -597,7 +606,7 @@ describe("createRuntimeBridge", () => {
         SkeletonBinary: undefined,
       },
     } as unknown as RuntimeAdapter;
-    const bridge = createRuntimeBridge("3.5", jsonOnlyRuntime);
+    const bridge = createRuntimeBridge(version, jsonOnlyRuntime);
 
     await expect(bridge.load({
       ...harness.input,
@@ -606,7 +615,7 @@ describe("createRuntimeBridge", () => {
     })).rejects.toMatchObject({
       name: "RuntimeCapabilityError",
       code: "RUNTIME_CAPABILITY_UNSUPPORTED",
-      details: [expect.stringMatching(/Spine 3\.5.*不支持 SKEL.*不会.*其他版本 Runtime/)],
+      details: [expect.stringMatching(new RegExp(`Spine ${version.replace(".", "\\.")}.*不支持 SKEL.*不会.*其他版本 Runtime`))],
     });
     expect(getContext).not.toHaveBeenCalled();
   });
