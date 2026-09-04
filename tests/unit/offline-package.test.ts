@@ -161,6 +161,54 @@ describe("离线包脚本", () => {
       .toThrow(/普通文件|符号链接/);
   });
 
+  it("拒绝指向构建根外的嵌套目录符号链接", () => {
+    const directory = makeOfflineBuild();
+    const outsideDirectory = mkdtempSync(join(tmpdir(), "spine-offline-outside-directory-"));
+    temporaryDirectories.push(outsideDirectory);
+    writeFileSync(join(outsideDirectory, "outside.js"), 'export const outside = "not packaged";\n');
+    symlinkSync(outsideDirectory, join(directory, "assets/nested-link"), "dir");
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/普通文件|符号链接|目录/);
+  });
+
+  it("目录读取后被同名普通目录替换时按 identity fail-closed", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-directory-race-"));
+    const replacementDirectory = mkdtempSync(join(tmpdir(), "spine-offline-directory-replacement-"));
+    temporaryDirectories.push(archiveDirectory, replacementDirectory);
+    const targetDirectory = join(directory, "assets/nested");
+    mkdirSync(targetDirectory);
+    writeFileSync(join(targetDirectory, "same-name.js"), 'export const value = "original";\n');
+    writeFileSync(join(replacementDirectory, "same-name.js"), 'export const value = "replacement";\n');
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { rename } from "node:fs/promises";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  afterDirectoryRead: async (directory) => {",
+      "    if (directory !== process.env.SPINE_OFFLINE_REPLACE_DIRECTORY) return;",
+      '    await rename(directory, `${directory}-original`);',
+      "    await rename(process.env.SPINE_OFFLINE_DIRECTORY_SOURCE, directory);",
+      "  },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: join(archiveDirectory, "offline.zip"),
+        SPINE_OFFLINE_REPLACE_DIRECTORY: targetDirectory,
+        SPINE_OFFLINE_DIRECTORY_SOURCE: replacementDirectory,
+      },
+      stdio: "pipe",
+    })).toThrow(/目录.*替换|目录.*identity|枚举与读取/);
+  });
+
   it.each([
     ["反斜杠", "assets/helper\\runtime-5_0-a.js"],
     ["控制字符", "assets/control-\u0001.js"],
@@ -176,6 +224,47 @@ describe("离线包脚本", () => {
 
     expect(() => packageFixture(directory, join(directory, "offline.zip")))
       .toThrow(/归档路径|Runtime 文件集合/);
+  });
+
+  it.each([
+    ["尾随点", "assets/index.js."],
+    ["尾随空格", "assets/index.js "],
+    ["小于号", "assets/invalid<name.js"],
+    ["大于号", "assets/invalid>name.js"],
+    ["冒号", "assets/invalid:name.js"],
+    ["双引号", 'assets/invalid"name.js'],
+    ["竖线", "assets/invalid|name.js"],
+    ["问号", "assets/invalid?name.js"],
+    ["星号", "assets/invalid*name.js"],
+    ["CON 扩展名", "assets/CON.js"],
+    ["PRN", "assets/prn"],
+    ["AUX 扩展名", "assets/AUX.css"],
+    ["NUL 扩展名", "assets/nul.txt"],
+    ["COM1 扩展名", "assets/COM1.json"],
+    ["LPT9 扩展名", "assets/lpt9.js"],
+  ])("拒绝 Windows 不安全 archive path：%s", (_label, archivePath) => {
+    const directory = makeOfflineBuild();
+    const path = join(directory, archivePath);
+    writeFileSync(path, "export {};\n");
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/归档路径|Windows|设备名/);
+  });
+
+  it("拒绝 Windows 大小写不敏感 archive path 碰撞", () => {
+    const directory = makeOfflineBuild();
+    writeFileSync(join(directory, "assets/INDEX-A.JS"), "export {};\n");
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/碰撞/);
+  });
+
+  it("大写脚本扩展名仍接受网络能力审计", () => {
+    const directory = makeOfflineBuild();
+    writeFileSync(join(directory, "assets/NETWORK.JS"), 'fetch("https://example.invalid/upper");\n');
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/远程运行依赖/);
   });
 
   it("快照后磁盘替换不会改变已审计并写入 ZIP 的 bytes", async () => {
@@ -225,6 +314,9 @@ describe("离线包脚本", () => {
     ["嵌套 entry", "assets/nested/runtime-3_5-a.js"],
     ["Runtime 命名目录", "assets/runtime-shadow/chunk.js"],
     ["伪装 helper", "assets/runtime-factory-copy.js"],
+    ["无分隔后缀", "assets/helper-runtime.js"],
+    ["点分隔", "assets/vendor.runtime.js"],
+    ["裸文件名", "assets/runtime.js"],
   ])("拒绝额外 Runtime 候选：%s", (_label, archivePath) => {
     const directory = makeOfflineBuild();
     const path = join(directory, archivePath);

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, open, readdir, writeFile } from "node:fs/promises";
-import { dirname, posix, relative, resolve, sep } from "node:path";
+import { lstat, open, readdir, realpath, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import JSZip from "jszip";
@@ -40,31 +40,109 @@ function toArchivePath(path) {
   return path.split(sep).join("/");
 }
 
-function assertCanonicalArchivePath(path) {
+function assertCanonicalArchivePath(path, { allowNonAscii = false } = {}) {
   assert.equal(path.normalize("NFC"), path, `离线归档路径必须使用规范化 Unicode：${JSON.stringify(path)}`);
-  assert.match(path, /^[\x20-\x7e]+$/, `离线归档路径只允许可打印 ASCII：${JSON.stringify(path)}`);
+  assert.ok(!/[\u0000-\u001f\u007f]/.test(path), `离线归档路径不得包含控制字符：${JSON.stringify(path)}`);
+  if (!allowNonAscii) {
+    assert.match(path, /^[\x20-\x7e]+$/, `离线归档路径只允许可打印 ASCII：${JSON.stringify(path)}`);
+  }
   assert.ok(!path.includes("\\"), `离线归档路径不得包含反斜杠：${JSON.stringify(path)}`);
   assert.ok(!posix.isAbsolute(path), `离线归档路径不得为绝对路径：${JSON.stringify(path)}`);
   assert.equal(posix.normalize(path), path, `离线归档路径必须为规范相对路径：${JSON.stringify(path)}`);
+  const segments = path.split("/");
   assert.ok(
-    path.length > 0 && path.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== ".."),
+    path.length > 0 && segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".."),
     `离线归档路径包含非法 segment：${JSON.stringify(path)}`,
+  );
+  for (const segment of segments) {
+    assert.ok(!/[ .]$/.test(segment), `离线归档路径 segment 不得以点或空格结尾：${JSON.stringify(path)}`);
+    assert.ok(!/[<>:"|?*]/.test(segment), `离线归档路径包含 Windows 保留字符：${JSON.stringify(path)}`);
+    const deviceName = segment.split(".", 1)[0].replace(/[ .]+$/g, "");
+    assert.ok(
+      !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(deviceName),
+      `离线归档路径包含 Windows 设备名：${JSON.stringify(path)}`,
+    );
+  }
+}
+
+function assertContainedByRoot(rootPath, targetPath, label) {
+  const relativePath = relative(rootPath, targetPath);
+  assert.ok(
+    relativePath === "" || (relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath)),
+    `离线构建 ${label} 的 realpath 越出构建根：${targetPath}`,
   );
 }
 
-async function filesRecursively(directory) {
-  const entries = await readdir(directory, { withFileTypes: true });
-  entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
-  const paths = await Promise.all(entries.map(async (entry) => {
-    const path = resolve(directory, entry.name);
-    return entry.isDirectory() ? filesRecursively(path) : [path];
-  }));
-  return paths.flat();
+function assertSameIdentity(actual, expected, message) {
+  assert.equal(actual.dev, expected.dev, message);
+  assert.equal(actual.ino, expected.ino, message);
 }
 
-async function snapshotRegularFile(path) {
+async function verifyDirectoryIdentity(directory, rootPath) {
+  let listed;
+  let resolvedPath;
+  try {
+    listed = await lstat(directory.path, { bigint: true });
+    resolvedPath = await realpath(directory.path);
+  } catch (error) {
+    throw new Error(`离线构建目录在枚举与读取之间发生替换或移除：${directory.path}: ${error.code ?? error.message}`);
+  }
+  assert.ok(
+    listed.isDirectory() && !listed.isSymbolicLink(),
+    `离线构建目录祖先必须是普通目录，拒绝符号链接、junction 或非目录：${directory.path}`,
+  );
+  assertSameIdentity(listed, directory.identity, `离线构建目录在枚举与读取之间发生替换：${directory.path}`);
+  assert.equal(resolvedPath, directory.realPath, `离线构建目录 realpath 在枚举与读取之间发生替换：${directory.path}`);
+  assertContainedByRoot(rootPath, resolvedPath, "目录");
+  const opened = await directory.handle.stat({ bigint: true });
+  assert.ok(opened.isDirectory(), `离线构建已打开的目录 handle 不再指向目录：${directory.path}`);
+  assertSameIdentity(opened, directory.identity, `离线构建目录 handle identity 发生变化：${directory.path}`);
+}
+
+async function verifyDirectoryAncestors(directories, rootPath) {
+  // Node does not expose openat-style child traversal. Keep every traversed
+  // directory handle open and re-check path identity/realpath around each
+  // descendant snapshot so an ancestor swap fails closed at a checkpoint.
+  for (const directory of directories) await verifyDirectoryIdentity(directory, rootPath);
+}
+
+async function openVerifiedDirectory(path, rootPath, ancestors) {
+  await verifyDirectoryAncestors(ancestors, rootPath);
+  const listed = await lstat(path, { bigint: true });
+  assert.ok(
+    listed.isDirectory() && !listed.isSymbolicLink(),
+    `离线构建目录祖先必须是普通目录，拒绝符号链接、junction 或非目录：${path}`,
+  );
+  const resolvedPath = await realpath(path);
+  assertContainedByRoot(rootPath, resolvedPath, "目录");
+
+  let handle;
+  try {
+    handle = await open(
+      path,
+      constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
+  } catch (error) {
+    throw new Error(`离线构建无法安全打开目录（拒绝符号链接或 junction）：${path}: ${error.code ?? error.message}`);
+  }
+
+  try {
+    const opened = await handle.stat({ bigint: true });
+    assert.ok(opened.isDirectory(), `离线构建目录祖先必须是普通目录：${path}`);
+    assertSameIdentity(opened, listed, `离线构建目录在打开前发生替换：${path}`);
+    return { path, realPath: resolvedPath, identity: opened, handle };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function snapshotRegularFile(path, rootPath, ancestors) {
+  await verifyDirectoryAncestors(ancestors, rootPath);
   const listed = await lstat(path, { bigint: true });
   assert.ok(listed.isFile(), `离线构建只允许普通文件，拒绝符号链接或特殊文件：${path}`);
+  const resolvedPath = await realpath(path);
+  assertContainedByRoot(rootPath, resolvedPath, "文件");
 
   let handle;
   try {
@@ -79,12 +157,53 @@ async function snapshotRegularFile(path) {
   try {
     const opened = await handle.stat({ bigint: true });
     assert.ok(opened.isFile(), `离线构建只允许普通文件，拒绝符号链接或特殊文件：${path}`);
-    assert.equal(opened.dev, listed.dev, `离线构建文件在枚举与读取之间发生替换：${path}`);
-    assert.equal(opened.ino, listed.ino, `离线构建文件在枚举与读取之间发生替换：${path}`);
-    return await handle.readFile();
+    assertSameIdentity(opened, listed, `离线构建文件在枚举与读取之间发生替换：${path}`);
+    await verifyDirectoryAncestors(ancestors, rootPath);
+    const contents = await handle.readFile();
+    const afterRead = await lstat(path, { bigint: true });
+    assert.ok(afterRead.isFile(), `离线构建文件读取后不再是普通文件：${path}`);
+    assertSameIdentity(afterRead, opened, `离线构建文件在读取期间发生替换：${path}`);
+    const afterRealPath = await realpath(path);
+    assert.equal(afterRealPath, resolvedPath, `离线构建文件 realpath 在读取期间发生替换：${path}`);
+    assertContainedByRoot(rootPath, afterRealPath, "文件");
+    await verifyDirectoryAncestors(ancestors, rootPath);
+    return contents;
   } finally {
     await handle.close();
   }
+}
+
+async function snapshotFilesRecursively(rootDirectory, afterDirectoryRead) {
+  const rootPath = await realpath(rootDirectory);
+  const listedRoot = await lstat(rootDirectory, { bigint: true });
+  assert.ok(
+    listedRoot.isDirectory() && !listedRoot.isSymbolicLink(),
+    `离线构建根必须是普通目录，拒绝符号链接或 junction：${rootDirectory}`,
+  );
+
+  const visit = async (directoryPath, ancestors) => {
+    const directory = await openVerifiedDirectory(directoryPath, rootPath, ancestors);
+    const lineage = [...ancestors, directory];
+    try {
+      const entries = await readdir(directoryPath, { withFileTypes: true });
+      entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+      await afterDirectoryRead?.(directoryPath);
+      await verifyDirectoryIdentity(directory, rootPath);
+
+      const files = [];
+      for (const entry of entries) {
+        const path = resolve(directoryPath, entry.name);
+        if (entry.isDirectory()) files.push(...await visit(path, lineage));
+        else files.push({ path, contents: await snapshotRegularFile(path, rootPath, lineage) });
+      }
+      await verifyDirectoryIdentity(directory, rootPath);
+      return files;
+    } finally {
+      await directory.handle.close();
+    }
+  };
+
+  return visit(rootDirectory, []);
 }
 
 async function buildOffline(skipBuild) {
@@ -98,10 +217,14 @@ async function buildOffline(skipBuild) {
 }
 
 function isRuntimeArtifactCandidate(path) {
-  return path.split("/").some((segment) => {
-    const lower = segment.toLowerCase();
-    return lower.includes("runtime-") || lower.includes("runtime_");
-  });
+  return path.split("/").some((segment) => /(^|[^a-z0-9])runtime(?=[^a-z0-9]|$)/i.test(segment));
+}
+
+function windowsArchivePathKey(path) {
+  return path
+    .split("/")
+    .map((segment) => segment.replace(/[ .]+$/g, "").toLowerCase())
+    .join("/");
 }
 
 export async function packageOffline(options = {}) {
@@ -115,17 +238,17 @@ export async function packageOffline(options = {}) {
 
   await buildOffline(skipBuild);
 
-  const outputFiles = await filesRecursively(outputDirectory);
-  const archiveFiles = (await Promise.all(outputFiles.map(async (path) => {
+  const outputFiles = await snapshotFilesRecursively(outputDirectory, options.afterDirectoryRead);
+  const archiveFiles = outputFiles.map(({ path, contents }) => {
     const relativePath = toArchivePath(relative(outputDirectory, path));
     const archivePath = relativePath === offlineEntry ? "index.html" : relativePath;
     assertCanonicalArchivePath(archivePath);
     return {
       path,
       archivePath,
-      contents: await snapshotRegularFile(path),
+      contents,
     };
-  }))).sort((left, right) => left.archivePath < right.archivePath ? -1 : left.archivePath > right.archivePath ? 1 : 0);
+  }).sort((left, right) => left.archivePath < right.archivePath ? -1 : left.archivePath > right.archivePath ? 1 : 0);
 
   assert.equal(
     new Set(archiveFiles.map(({ archivePath }) => archivePath)).size,
@@ -139,8 +262,21 @@ export async function packageOffline(options = {}) {
     ["启动离线工具.cmd", resolve(repositoryRoot, "offline/启动离线工具.cmd")],
   ].map(async ([archivePath, path]) => ({
     archivePath,
-    contents: await snapshotRegularFile(path),
+    contents: await snapshotRegularFile(path, await realpath(repositoryRoot), []),
   })));
+
+  const generatedArchivePaths = ["离线使用说明.txt", ...launcherFiles.map(({ archivePath }) => archivePath)];
+  for (const archivePath of generatedArchivePaths) assertCanonicalArchivePath(archivePath, { allowNonAscii: true });
+  const allArchivePaths = [...archiveFiles.map(({ archivePath }) => archivePath), ...generatedArchivePaths];
+  const windowsPathKeys = new Map();
+  for (const archivePath of allArchivePaths) {
+    const key = windowsArchivePathKey(archivePath);
+    assert.ok(
+      !windowsPathKeys.has(key),
+      `离线归档路径在 Windows 语义下发生碰撞：${windowsPathKeys.get(key)} / ${archivePath}`,
+    );
+    windowsPathKeys.set(key, archivePath);
+  }
 
   await options.afterSnapshot?.();
 
@@ -176,7 +312,7 @@ export async function packageOffline(options = {}) {
 
   const remoteDependencies = [];
   for (const file of archiveFiles) {
-    if (!/\.(?:html|js|css)$/.test(file.archivePath)) continue;
+    if (!/\.(?:html|js|css)$/i.test(file.archivePath)) continue;
     remoteDependencies.push(...externalRuntimeDependencies(file.archivePath, file.contents.toString("utf8")));
   }
   assert.deepEqual(remoteDependencies, [], `离线构建包含远程运行依赖：\n${remoteDependencies.join("\n")}`);
