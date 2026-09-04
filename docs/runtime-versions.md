@@ -1,6 +1,21 @@
 # Spine Runtime 版本与来源
 
-`scripts/runtime-sources.json` 固定 3.5–4.3 八条官方来源。当前已集成的 3.5、3.6、3.7、3.8 与 4.0–4.2 Runtime 在构建时进入各自的动态 chunk；4.3 只固定来源或依赖，等对应 adapter 真实存在后才纳入 chunk 验证。任何 `runtime-X_Y.ts` 只导入其对应的官方包或 vendor 构建；4.x 的 npm alias 各自解析到同版本 `@esotericsoftware/spine-core`，不能跨版本复用 core。
+`scripts/runtime-sources.json` 固定 3.5–4.3 八条官方来源。3.5、3.6、3.7、3.8 与 4.0–4.3 Runtime 都已集成，并在构建时进入各自的动态 chunk。任何 `runtime-X_Y.ts` 只导入其对应的官方包或 vendor 构建；4.x 的 npm alias 各自解析到同版本 `@esotericsoftware/spine-core`，不能跨版本复用 core。
+
+## 用户文件能力矩阵
+
+| Editor 版本线 | JSON | SKEL | 兼容策略 |
+| --- | --- | --- | --- |
+| 3.5 | 支持 | 不支持 | 3.5 Runtime；SKEL 返回中文能力错误 |
+| 3.6 | 支持 | 不支持 | 3.6 Runtime；SKEL 返回中文能力错误 |
+| 3.7 | 支持 | 不支持 | 3.7 Runtime；SKEL 返回中文能力错误 |
+| 3.8 | 支持 | 支持 | 3.8 Runtime；`3.8.75` 显示警告并尽力兼容 |
+| 4.0 | 支持 | 支持 | 4.0 Runtime |
+| 4.1 | 支持 | 支持 | 4.1 Runtime |
+| 4.2 | 支持 | 支持 | 4.2 Runtime |
+| 4.3 | 支持 | 支持 | 4.3 Runtime；预发布/Beta 显示警告 |
+
+稳定补丁号按相同 `major.minor` 路由，不跨版本读取。3.5–3.7 的官方 Web Runtime 没有 `SkeletonBinary`，所以这些版本只支持 JSON；手动 Runtime 重试也不会绕过这项能力限制。3.5–3.8 预览前需明确确认 `PMA` 或 `Straight Alpha`，4.x 则优先遵循 Atlas 页级 `pma`。
 
 | Editor 版本 | Runtime 来源 | 固定 revision | 来源产物 SHA-256 | 隔离的 core |
 | --- | --- | --- | --- | --- |
@@ -11,7 +26,7 @@
 | 4.0 | [官方 npm tarball `@esotericsoftware/spine-webgl@4.0.31`](https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz) | `4.0.31` | `fdfe7fc72b870a4da238f349634dd043390b5035dbce6782e7e4288adc6648a1`（tarball） | `@esotericsoftware/spine-core@4.0.31` |
 | 4.1 | [官方 npm tarball `@esotericsoftware/spine-webgl@4.1.56`](https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz) | `4.1.56` | `fc9c0c579e7d91fcba007fabdc7ecced6fad70fca84bd6e3374a3a4f6ac23e4d`（tarball） | `@esotericsoftware/spine-core@4.1.56` |
 | 4.2 | [官方 npm tarball `@esotericsoftware/spine-webgl@4.2.120`](https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz) | `4.2.120` | `d1cfacd523602524ed497c8b794cd394a52cc8118cf6a680b4542585e1f36666`（tarball） | `@esotericsoftware/spine-core@4.2.120` |
-| 4.3 | [官方 npm tarball `@esotericsoftware/spine-webgl@4.3.9`](https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz) | `4.3.9` | `fd8f6a38f9ab394e84801967209c304738c7ac84f1db9a7d8b0428203114b390`（tarball） | `@esotericsoftware/spine-core@4.3.9`（adapter 待集成） |
+| 4.3 | [官方 npm tarball `@esotericsoftware/spine-webgl@4.3.9`](https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz) | `4.3.9` | `fd8f6a38f9ab394e84801967209c304738c7ac84f1db9a7d8b0428203114b390`（tarball） | `@esotericsoftware/spine-core@4.3.9` |
 
 ## 3.5–3.8 构建记录
 
@@ -32,7 +47,7 @@
 - `vendor/spine-runtime-3.8/LICENSE` 是 3.8 commit 中 `spine-ts/LICENSE` 的未改写副本（SHA-256 `6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39`）。
 - `public/licenses/SPINE-RUNTIMES-LICENSE.txt` 是 4.2.120/4.3.9 官方 npm 包 `LICENSE` 的未改写副本（SHA-256 `435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e`）；4.0.31 与 4.1.56 自身的官方 LICENSE 也随各自 npm 包进入依赖树。
 
-运行 `npm run verify-runtime-assets` 会进行严格验证：除校验八条来源记录、package alias、package-lock 中 webgl/core 各自的官方 `resolved`/`integrity`、已安装 package 与 core 版本、关键入口及 core 完整 `dist` tree 的 hash、webgl/core LICENSE hash、vendor `SOURCE.json`/ESM 边界，以及一次不落盘的 Vite 构建中所有已集成动态 chunk 的实际模块来源和 core 隔离外，还会强制从仓库内固定的 3.8 gzip 来源归档与 patch 完整重建，并逐文件比较 JS、declaration、source map、LICENSE 与 SOURCE.json。归档缺失或任一压缩前后 hash、构建工具 pin、patch 语义、上游/补丁后/最终 hash 不匹配都会失败；`npm run package:offline` 的生命周期门禁也会先执行这条严格验证。普通开发可显式运行 `npm run verify-runtime-assets:fast` 跳过重建，但其输出明确标记不得用于 CI 或发布。未集成版本只报告“来源已固定（Runtime 待集成）”，不会声称不存在的构建产物或 chunk 已验证。
+运行 `npm run verify-runtime-assets` 会进行严格验证：除校验八条来源记录、package alias、package-lock 中 webgl/core 各自的官方 `resolved`/`integrity`、已安装 package 与 core 版本、关键入口及 core 完整 `dist` tree 的 hash、webgl/core LICENSE hash、vendor `SOURCE.json`/ESM 边界，以及一次不落盘的 Vite 构建中八个动态 Runtime chunk 的实际模块来源和 core 隔离外，还会强制从仓库内固定的 3.8 gzip 来源归档与 patch 完整重建，并逐文件比较 JS、declaration、source map、LICENSE 与 SOURCE.json。归档缺失或任一压缩前后 hash、构建工具 pin、patch 语义、上游/补丁后/最终 hash 不匹配都会失败；`npm run package:offline` 的生命周期门禁也会先执行这条严格验证。普通开发可显式运行 `npm run verify-runtime-assets:fast` 跳过重建，但其输出明确标记不得用于 CI 或发布。
 
 对 4.x，验证脚本还会要求 lockfile 的 `resolved` 精确等于表中的官方 registry tarball URL，并要求完整 SRI 分别为：
 

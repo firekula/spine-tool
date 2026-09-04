@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将现有 Spine 预览与 Atlas 导出工具扩展为自动支持 3.5、3.6、3.7、3.8、4.0、4.1、4.2、4.3 的 JSON/SKEL，并为官方主动拒绝的 3.8.75 提供带警告的尽力兼容加载。
+**Goal:** 将现有 Spine 预览与 Atlas 导出工具扩展为自动支持 3.5–4.3 的八条版本线：3.5–3.7 支持 JSON，3.8–4.3 支持 JSON/SKEL，并为官方主动拒绝的 3.8.75 提供带警告的尽力兼容加载。
 
 **Architecture:** 使用强类型 Runtime 注册表把原始版本映射到八个互相隔离、按需加载的 WebGL Runtime chunk；每个旧版本差异封装在自己的 adapter 内，工作区只依赖统一 bridge。Atlas-only 导出继续独立于 Runtime；Runtime 解析或渲染失败时仍保留导出资源。
 
@@ -14,7 +14,7 @@
 
 - 明确支持 `3.5 | 3.6 | 3.7 | 3.8 | 4.0 | 4.1 | 4.2 | 4.3` 八条 Runtime 版本线。
 - 同一 `major.minor` 下所有稳定补丁号路由到该版本线；Beta 后缀允许尝试，但必须显示兼容警告。
-- JSON 和 SKEL 必须由匹配的 `major.minor` Runtime 读取，不用 4.3 静默读取旧格式。
+- JSON 必须由匹配的 `major.minor` Runtime 读取；SKEL 仅由匹配的 3.8–4.3 Runtime 读取。3.5–3.7 SKEL 明确报能力错误，不用其他版本 Runtime 静默读取。
 - 3.8.75 使用尽力兼容模式，只移除官方 Runtime 的精确主动拒绝，不修改用户文件或其他数据检查。
 - 3.5–3.8 在 Atlas 没有可靠 `pma` 时必须让用户确认 PMA/Straight；文件名仅可预选。
 - Runtime 失败不阻断已经有效的 Atlas-only PNG ZIP 导出。
@@ -47,7 +47,8 @@ scripts/
   runtime-sources.json                八版本来源、hash、package integrity
   verify-runtime-assets.mjs           无 npm cache 依赖的来源和隔离校验
 tests/fixtures/official-spine/
-  3.5/ 3.6/ 3.7/ 4.3/                官方 JSON、SKEL、Atlas、PNG fixture
+  3.5/ 3.6/ 3.7/                     官方 JSON、Atlas、PNG fixture 与 SKEL 能力错误覆盖
+  4.3/                               官方 JSON、SKEL、Atlas、PNG fixture
   SOURCES.json                        fixture 来源与 SHA-256
 tests/fixtures/spine-3.8.75-minimal/  不含用户素材的最小回归 fixture
 tests/unit/runtime-registry.test.ts
@@ -212,6 +213,8 @@ git commit -m "build: pin Spine 3.5 through 4.3 sources"
 
 ### Task 3: 集成 Spine 3.5 Runtime 与真实 fixture
 
+> 执行时确认：固定的官方 3.5 Web Runtime 不提供 `SkeletonBinary`。用户选择将 3.5–3.7 定为 JSON-only；以下步骤按该决定修订，保留同版本隔离和显式能力错误要求。
+
 **Files:**
 - Create: `vendor/spine-runtime-3.5/**`
 - Create: `lib/spine/runtime-3_5.ts`
@@ -226,15 +229,15 @@ git commit -m "build: pin Spine 3.5 through 4.3 sources"
 - Produces: `runtime-3_5.ts` 的 `version`, `source`, `runtimeConstructors`, `createBridge()`。
 - Consumes: `RuntimeAdapter` 与统一 `createRuntimeBridge()`。
 
-- [ ] **Step 1: 写真实 JSON/SKEL 加载失败测试**
+- [ ] **Step 1: 写真实 JSON 加载与 SKEL 能力错误测试**
 
-将官方 3.5 示例的 JSON、SKEL、Atlas、PNG 连同来源 URL/SHA-256 固定到 fixture。扩展现有矩阵：
+将官方 3.5 示例的 JSON、Atlas、PNG 连同来源 URL/SHA-256 固定到 fixture，并用最小二进制输入覆盖 SKEL 能力错误。扩展现有矩阵：
 
 ```ts
 const versions = ["3.5", "3.8", "4.0", "4.1", "4.2"] as const;
 ```
 
-断言 3.5 JSON 和 SKEL 均进入 `Spine 3.5 · 预览已就绪`，能读取动画、皮肤、插槽并绘制非透明像素。
+断言 3.5 JSON 进入 `Spine 3.5 · 预览已就绪`，能读取动画、皮肤、插槽并绘制非透明像素；3.5 SKEL 返回中文能力错误，且不调用其他版本 Runtime。
 
 - [ ] **Step 2: 运行 3.5 测试确认 RED**
 
@@ -244,13 +247,13 @@ Expected: FAIL，3.5 adapter/vendor 尚不存在。
 
 - [ ] **Step 3: 构建最小 3.5 adapter**
 
-`runtime-3_5.ts` 显式映射 3.5 的 `TextureAtlas`、`AtlasAttachmentLoader`、`SkeletonJson`、`SkeletonBinary`、`AnimationState`、`Skin`、`GLTexture`、`SceneRenderer`。如果方法签名不同，在 adapter 提供 `updateSkeleton`、`updateWorldTransform`、`isRegionAttachment`，不在 `runtime-factory.ts` 判断版本字符串。模块完成后才在 `runtime-loader.ts` 加入 `"3.5": () => import("./runtime-3_5")`。
+`runtime-3_5.ts` 显式映射 3.5 的 `TextureAtlas`、`AtlasAttachmentLoader`、`SkeletonJson`、`AnimationState`、`Skin`、`GLTexture`、`SceneRenderer`，并声明没有 Binary reader。如果方法签名不同，在 adapter 提供 `updateSkeleton`、`updateWorldTransform`、`isRegionAttachment`，不在 `runtime-factory.ts` 判断版本字符串。模块完成后才在 `runtime-loader.ts` 加入 `"3.5": () => import("./runtime-3_5")`。
 
 - [ ] **Step 4: 运行 3.5 测试确认 GREEN**
 
 Run: `npm test -- tests/unit/runtime-loader.test.ts tests/unit/official-fixtures.test.ts && npx playwright test tests/e2e/official-runtime-fixtures.spec.ts --grep "3.5"`
 
-Expected: 3.5 JSON/SKEL 均真实解析、渲染和释放资源。
+Expected: 3.5 JSON 真实解析、渲染和释放资源；3.5 SKEL 明确失败且不跨版本读取。
 
 - [ ] **Step 5: 提交**
 
@@ -262,6 +265,8 @@ git commit -m "feat: add Spine 3.5 runtime"
 ---
 
 ### Task 4: 集成 Spine 3.6 Runtime 与真实 fixture
+
+> 按 Task 3 的用户决定，3.6 同样为 JSON-only，并对 SKEL fail-closed。
 
 **Files:**
 - Create: `vendor/spine-runtime-3.6/**`
@@ -275,7 +280,7 @@ git commit -m "feat: add Spine 3.5 runtime"
 
 **Interfaces:** 与 Task 3 相同，但 module version 必须是字面量 `"3.6"`，构造器必须来自 3.6 自己的 vendor chunk。
 
-- [ ] **Step 1: 把 3.6 JSON/SKEL 加入矩阵并确认 RED**
+- [ ] **Step 1: 把 3.6 JSON 与 SKEL 能力错误加入矩阵并确认 RED**
 
 Run: `npm test -- tests/unit/runtime-loader.test.ts tests/unit/official-fixtures.test.ts && npx playwright test tests/e2e/official-runtime-fixtures.spec.ts --grep "3.6"`
 
@@ -289,7 +294,7 @@ Expected: FAIL，3.6 module 不存在。
 
 Run: `npm test -- tests/unit/runtime-loader.test.ts tests/unit/official-fixtures.test.ts && npx playwright test tests/e2e/official-runtime-fixtures.spec.ts --grep "Spine 3.[56]"`
 
-Expected: 3.5/3.6 JSON/SKEL 全部通过。
+Expected: 3.5/3.6 JSON 预览通过；两者的 SKEL 都返回明确能力错误且不跨版本读取。
 
 - [ ] **Step 4: 提交**
 
@@ -301,6 +306,8 @@ git commit -m "feat: add Spine 3.6 runtime"
 ---
 
 ### Task 5: 集成 Spine 3.7 Runtime 与真实 fixture
+
+> 按 Task 3 的用户决定，3.7 同样为 JSON-only，并对 SKEL fail-closed。
 
 **Files:**
 - Create: `vendor/spine-runtime-3.7/**`
@@ -314,7 +321,7 @@ git commit -m "feat: add Spine 3.6 runtime"
 
 **Interfaces:** 与 Task 3 相同，module version 为 `"3.7"`，构造器只来自 3.7 vendor chunk。
 
-- [ ] **Step 1: 把 3.7 JSON/SKEL 加入矩阵并确认 RED**
+- [ ] **Step 1: 把 3.7 JSON 与 SKEL 能力错误加入矩阵并确认 RED**
 
 Run: `npm test -- tests/unit/runtime-loader.test.ts tests/unit/official-fixtures.test.ts && npx playwright test tests/e2e/official-runtime-fixtures.spec.ts --grep "3.7"`
 
@@ -328,7 +335,7 @@ Expected: FAIL，3.7 module 不存在。
 
 Run: `npm test -- tests/unit/runtime-loader.test.ts tests/unit/official-fixtures.test.ts && npx playwright test tests/e2e/official-runtime-fixtures.spec.ts --grep "Spine 3."`
 
-Expected: 3.5、3.6、3.7、3.8 JSON/SKEL 全部通过。
+Expected: 3.5、3.6、3.7 JSON 与 3.8 JSON/SKEL 预览通过；3.5–3.7 SKEL 均返回明确能力错误且不跨版本读取。
 
 - [ ] **Step 4: 提交**
 
@@ -568,7 +575,7 @@ Expected: 所有 Vitest 测试通过，包含空 npm cache 来源验证。
 
 Run: `npx playwright test`
 
-Expected: 所有 Chromium 测试通过，八版本 JSON/SKEL、3.8.75、PMA/Straight、动画/皮肤/插槽、旋转/裁剪/倍率/ZIP 均为 GREEN。
+Expected: 所有 Chromium 测试通过，八版本 JSON、3.8–4.3 SKEL、3.5–3.7 SKEL 能力错误、3.8.75、PMA/Straight、动画/皮肤/插槽、旋转/裁剪/倍率/ZIP 均为 GREEN。
 
 Run: `npm run verify-runtime-assets`
 
