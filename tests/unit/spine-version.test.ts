@@ -41,6 +41,17 @@ describe("detectSpineVersion", () => {
       .resolves.toMatchObject({ raw: "3.8.99", majorMinor: "3.8", source: "skel-header", supported: true });
   });
 
+  it("保留 SKEL 预发布版本并标记兼容风险", async () => {
+    await expect(detectSpineVersion(binaryFile("hero.skel", skelHeader("4.3.0-beta"))))
+      .resolves.toMatchObject({
+        raw: "4.3.0-beta",
+        majorMinor: "4.3",
+        source: "skel-header",
+        supported: true,
+        compatibility: "prerelease",
+      });
+  });
+
   it.each([
     ["3.5.51", "3.5"], ["3.6.53", "3.6"], ["3.7.94", "3.7"],
     ["3.8.75", "3.8"], ["3.8.99", "3.8"], ["4.0.64", "4.0"],

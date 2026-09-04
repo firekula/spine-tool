@@ -15,6 +15,7 @@ export interface DetectedSpineVersion {
 }
 
 const SKEL_HEADER_BYTES = 256;
+const SPINE_VERSION_PATTERN = /^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?$/;
 
 interface DecodedString {
   value: string | null;
@@ -80,19 +81,19 @@ function readSpineString(bytes: Uint8Array, offset: number): DecodedString | nul
 function readSkelHeaderVersion(bytes: Uint8Array): string | null {
   const hash = readSpineString(bytes, 0);
   const legacyVersion = hash ? readSpineString(bytes, hash.next)?.value : null;
-  if (legacyVersion && /^\d+\.\d+(?:\.\d+)?$/.test(legacyVersion)) return legacyVersion;
+  if (legacyVersion && SPINE_VERSION_PATTERN.test(legacyVersion)) return legacyVersion;
 
   // Spine 4.x replaced the serialized hash string with two int32 values.
   // The version string therefore starts at byte 8 in current SKEL files.
   const numericHashVersion = readSpineString(bytes, 8)?.value;
-  return numericHashVersion && /^\d+\.\d+(?:\.\d+)?$/.test(numericHashVersion)
+  return numericHashVersion && SPINE_VERSION_PATTERN.test(numericHashVersion)
     ? numericHashVersion
     : null;
 }
 
 function findAsciiVersion(bytes: Uint8Array): string | null {
   const text = new TextDecoder("latin1").decode(bytes);
-  const match = text.match(/(?:^|[^0-9.])(\d+\.\d+(?:\.\d+)?)(?=$|[^0-9.])/);
+  const match = text.match(/(?:^|[^0-9A-Za-z.-])(\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?)(?=$|[^0-9A-Za-z.-])/);
   return match?.[1] ?? null;
 }
 
