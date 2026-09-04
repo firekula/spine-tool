@@ -131,7 +131,7 @@ export function ImportDropzone({ inputId: suppliedInputId, disabled = false, onI
       >
         {isImporting ? "正在验证…" : "选择文件"}
       </button>
-      <p className="import-local-note">文件仅在本地处理。</p>
+      <p className="import-local-note">文件仅在本地处理；Spine 3.5–3.7 的 SKEL 会提示改用同版本 JSON，Atlas Region 仍可导出。</p>
       {errorMessage && <p className="import-error" role="alert">{errorMessage}</p>}
       <dl className="import-summary" aria-label="已识别的导入文件">
         <div><dt>Atlas</dt><dd>{summary.atlas ?? "未选择"}</dd></div>

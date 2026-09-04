@@ -74,8 +74,8 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
   },
   UNSUPPORTED_SPINE_VERSION: {
     title: "Spine 版本不在支持范围",
-    reason: "检测到的版本不是明确支持的 3.8、4.0、4.1 或 4.2。",
-    action: "请选择正确的 Runtime 尝试预览，或用受支持版本重新导出骨骼。",
+    reason: "检测到的版本不在明确支持的 Spine 3.5–4.3 版本线内。",
+    action: "请选择正确的 Runtime 尝试预览，或用 Spine 3.5–4.3 中对应版本重新导出骨骼。",
   },
   UNDETECTABLE_SPINE_VERSION: {
     title: "无法识别 Spine 版本",

@@ -34,4 +34,27 @@ describe("workspaceReducer", () => {
     expect(after.phase).toBe("ready");
     expect(after.warnings).toEqual([issue]);
   });
+
+  it("记录素材原始版本、实际 Runtime、选择来源和兼容性并在重导入时清空", () => {
+    const identified = workspaceReducer(createInitialWorkspaceState(), {
+      type: "IMPORT_VERSION_IDENTIFIED",
+      rawVersion: "3.8.75",
+      runtimeVersion: "3.8",
+      selectionSource: "automatic",
+      compatibility: "spine-3.8.75",
+    });
+
+    expect(identified).toMatchObject({
+      rawVersion: "3.8.75",
+      runtimeVersion: "3.8",
+      selectionSource: "automatic",
+      compatibility: "spine-3.8.75",
+    });
+    expect(workspaceReducer(identified, { type: "IMPORT_STARTED" })).toMatchObject({
+      rawVersion: null,
+      runtimeVersion: null,
+      selectionSource: null,
+      compatibility: null,
+    });
+  });
 });

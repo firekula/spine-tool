@@ -114,7 +114,7 @@ function classifyFollowingAttributeBlock(lines: string[], from: number): "page" 
 }
 
 /**
- * Parses Spine 3.8--4.2 text Atlas files into one stable Region shape.
+ * Parses Spine 3.5--4.3 text Atlas files into one stable Region shape.
  * Region attributes are recognized by parser state, so valid files whose
  * attributes are not indented remain distinct from subsequent texture pages.
  */

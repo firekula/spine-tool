@@ -1,5 +1,10 @@
 export type SupportedSpineVersion = "3.5" | "3.6" | "3.7" | "3.8" | "4.0" | "4.1" | "4.2" | "4.3";
 
+/** Canonical UI/runtime order. Consumers must not maintain a second version list. */
+export const SUPPORTED_SPINE_VERSIONS = Object.freeze([
+  "3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3",
+] as const satisfies readonly SupportedSpineVersion[]);
+
 export type RuntimeCompatibility = "stable" | "prerelease" | "spine-3.8.75";
 
 export interface RuntimeDescriptor {

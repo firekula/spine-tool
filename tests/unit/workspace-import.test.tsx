@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportValidationError, type ImportBundle } from "@/lib/files/import-files";
 import type { PreparedImport, RuntimeSession } from "@/lib/files/import-workflow";
 import type { SkeletonMetadata, SpineRuntimeBridge } from "@/lib/spine/bridge-types";
+import type { SupportedSpineVersion } from "@/lib/spine/runtime-registry";
 
 const mocks = vi.hoisted(() => ({
   classifyImport: vi.fn(),
@@ -31,7 +32,7 @@ const metadata: SkeletonMetadata = {
   regionAttachments: [],
 };
 
-function fakeBridge(version: "4.2" | "4.3" = "4.2"): SpineRuntimeBridge {
+function fakeBridge(version: SupportedSpineVersion = "4.2"): SpineRuntimeBridge {
   return {
     version,
     load: vi.fn(async () => metadata),
@@ -120,11 +121,46 @@ describe("WorkspaceShell import integration", () => {
     expect(mocks.createRuntimeSession).toHaveBeenCalledWith(bundle, "4.2");
     await waitFor(() => expect(bridge.load).toHaveBeenCalled());
     await screen.findByText("Spine 4.2 · 预览已就绪");
+    const versionInfo = screen.getByRole("group", { name: "Spine 版本信息" });
+    expect(versionInfo.textContent).toContain("素材版本 4.2.0");
+    expect(versionInfo.textContent).toContain("Runtime 4.2（自动）");
     expect(screen.getByRole("button", { name: "idle" })).toHaveProperty("disabled", false);
 
     await userEvent.setup().click(screen.getByRole("button", { name: "重新导入" }));
     expect(sessionRelease).toHaveBeenCalledTimes(1);
     expect(exportRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("手动 Runtime 选择器按注册表顺序提供八条版本线并显示手动来源", async () => {
+    const bundle = importBundle();
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: { raw: "4.4.0", majorMinor: null, source: "json-field", supported: false, compatibility: null },
+      exportResources: {
+        atlas: { pages: [], regions: [] },
+        textures: new Map(),
+        acquire: vi.fn(),
+        release: vi.fn(),
+      },
+    } satisfies PreparedImport);
+    mocks.createRuntimeSession.mockRejectedValue(new Error("synthetic manual runtime failure"));
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+
+    const picker = await screen.findByRole("combobox", { name: "Runtime 版本" });
+    expect(Array.from((picker as HTMLSelectElement).options).map((option) => option.value)).toEqual([
+      "3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3",
+    ]);
+    await userEvent.setup().selectOptions(picker, "4.3");
+    await userEvent.setup().click(screen.getByRole("button", { name: "使用所选 Runtime 加载预览" }));
+
+    const versionInfo = screen.getByRole("group", { name: "Spine 版本信息" });
+    expect(versionInfo.textContent).toContain("素材版本 4.4.0");
+    expect(versionInfo.textContent).toContain("Runtime 4.3（手动）");
   });
 
   it("Spine 3.5 先取得 Alpha 确认再把 PMA 选择传入 Runtime session", async () => {
@@ -207,6 +243,9 @@ describe("WorkspaceShell import integration", () => {
     });
 
     await screen.findByText("Spine 3.8.75 尽力兼容");
+    const versionInfo = screen.getByRole("group", { name: "Spine 版本信息" });
+    expect(versionInfo.textContent).toContain("素材版本 3.8.75");
+    expect(versionInfo.textContent).toContain("Runtime 3.8（自动）");
     expect(screen.getByText("SPINE_3_8_75_COMPATIBILITY")).toBeTruthy();
     expect(screen.queryByText("SPINE_PRERELEASE_COMPATIBILITY")).toBeNull();
     expect(screen.getByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" })).toBeTruthy();
@@ -306,6 +345,62 @@ describe("WorkspaceShell import integration", () => {
     expect(screen.getByText("Atlas 已就绪，预览尚未可用")).toBeTruthy();
     expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false);
     expect(exportRelease).not.toHaveBeenCalled();
+  });
+
+  it("Spine 3.5 SKEL 能力失败后释放 Runtime session 并保留 Atlas 导出资源", async () => {
+    const bundle = importBundle();
+    bundle.skeletonFile = new File([new Uint8Array([1, 2, 3])], "hero.skel");
+    bundle.skeletonKind = "skel";
+    const sessionRelease = vi.fn();
+    const bridge = fakeBridge("3.5");
+    vi.mocked(bridge.load).mockRejectedValue(Object.assign(
+      new Error("Spine 3.5 官方 Runtime 不支持 SKEL（二进制）骨骼"),
+      {
+        code: "RUNTIME_CAPABILITY_UNSUPPORTED",
+        details: ["请改用同版本 JSON 导出。工具不会交给其他版本 Runtime 读取。"],
+      },
+    ));
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: { raw: "3.5.51", majorMinor: "3.5", source: "skel-header", supported: true, compatibility: "stable" },
+      exportResources: {
+        atlas: {
+          pages: [{ name: "page.png", width: 1, height: 1, custom: {} }],
+          regions: [{
+            name: "square", pageName: "page.png", rotation: 0, x: 0, y: 0,
+            packedWidth: 1, packedHeight: 1, originalWidth: 1, originalHeight: 1,
+            offsetLeft: 0, offsetBottom: 0, index: -1, custom: {},
+          }],
+        },
+        textures: new Map([["page.png", {} as ImageBitmap]]),
+        acquire: vi.fn(),
+        release: vi.fn(),
+      },
+    } satisfies PreparedImport);
+    mocks.createRuntimeSession.mockResolvedValue({
+      bridge,
+      input: {
+        atlasText: "atlas",
+        skeleton: { kind: "skel", bytes: new Uint8Array([1, 2, 3]) },
+        textureObjectUrls: new Map([["page.png", "blob:page"]]),
+        alphaMode: "straight",
+      },
+      release: sessionRelease,
+    } satisfies RuntimeSession);
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+    await screen.findByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式并加载预览" }));
+
+    await screen.findByText("当前 Runtime 不支持 SKEL");
+    expect(sessionRelease).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { name: "Region（1）" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("group", { name: "Spine 版本信息" }).textContent).toContain("Runtime 3.5（自动）");
   });
 
   it("Atlas 回退状态下再次选择无效文件也会释放上一批导入资源", async () => {

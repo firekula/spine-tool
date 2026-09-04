@@ -11,7 +11,7 @@ export interface RuntimeLoadInput {
   skeleton: RuntimeSkeletonInput;
   textureObjectUrls: ReadonlyMap<string, string>;
   canvas: HTMLCanvasElement;
-  /** Required by Spine 3.8, whose Atlas format may omit the page-level pma field. */
+  /** Required by Spine 3.5--3.8, whose Atlas format may omit the page-level pma field. */
   alphaMode?: TextureAlphaMode;
 }
 

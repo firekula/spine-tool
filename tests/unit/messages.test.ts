@@ -9,6 +9,7 @@ describe("getIssueMessage", () => {
     "UNSUPPORTED_SPINE_VERSION",
     "INVALID_SKEL_HEADER",
     "SPINE_3_8_75_COMPATIBILITY",
+    "SPINE_PRERELEASE_COMPATIBILITY",
     "RUNTIME_CAPABILITY_UNSUPPORTED",
     "WEBGL_UNAVAILABLE",
     "REGION_OUT_OF_BOUNDS",
@@ -34,5 +35,12 @@ describe("getIssueMessage", () => {
     ["REGION_EXPORT_FAILED", "Region 导出失败"],
   ])("%s 使用专属中文消息而不是未知错误兜底", (code, title) => {
     expect(getIssueMessage({ code, severity: "warning", subject: "hero" })).toMatchObject({ title });
+  });
+
+  it("支持范围文案覆盖 Spine 3.5 到 4.3 的全部八条版本线", () => {
+    expect(getIssueMessage({ code: "UNSUPPORTED_SPINE_VERSION", severity: "warning" })).toMatchObject({
+      reason: "检测到的版本不在明确支持的 Spine 3.5–4.3 版本线内。",
+      action: "请选择正确的 Runtime 尝试预览，或用 Spine 3.5–4.3 中对应版本重新导出骨骼。",
+    });
   });
 });

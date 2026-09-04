@@ -1,7 +1,12 @@
 import type { AppIssue } from "@/lib/issues/types";
 import type { PlaybackSnapshot } from "@/lib/spine/bridge-types";
+import type {
+  RuntimeCompatibility,
+  SupportedSpineVersion,
+} from "@/lib/spine/runtime-registry";
 
 export type WorkspacePhase = "empty" | "loading" | "ready" | "error";
+export type RuntimeSelectionSource = "automatic" | "manual";
 
 export interface WorkspaceState {
   phase: WorkspacePhase;
@@ -15,6 +20,10 @@ export interface WorkspaceState {
   playback: PlaybackSnapshot;
   seekRequest: { id: number; time: number } | null;
   warnings: AppIssue[];
+  rawVersion: string | null;
+  runtimeVersion: SupportedSpineVersion | null;
+  selectionSource: RuntimeSelectionSource | null;
+  compatibility: RuntimeCompatibility | null;
 }
 
 export type WorkspaceAction =
@@ -22,6 +31,18 @@ export type WorkspaceAction =
   | { type: "IMPORT_SUCCEEDED" }
   | { type: "IMPORT_FAILED"; issue: AppIssue }
   | { type: "REPORT_ISSUE"; issue: AppIssue }
+  | {
+      type: "IMPORT_VERSION_IDENTIFIED";
+      rawVersion: string | null;
+      runtimeVersion: SupportedSpineVersion | null;
+      selectionSource: RuntimeSelectionSource | null;
+      compatibility: RuntimeCompatibility | null;
+    }
+  | {
+      type: "RUNTIME_SELECTED";
+      runtimeVersion: SupportedSpineVersion;
+      selectionSource: RuntimeSelectionSource;
+    }
   | {
       type: "INITIALIZE_CONTROLS";
       animation: string | null;
@@ -52,6 +73,10 @@ export function createInitialWorkspaceState(): WorkspaceState {
     playback: { animation: null, duration: 0, playing: false, time: 0 },
     seekRequest: null,
     warnings: [],
+    rawVersion: null,
+    runtimeVersion: null,
+    selectionSource: null,
+    compatibility: null,
   };
 }
 
@@ -72,6 +97,10 @@ export function workspaceReducer(
         playback: { animation: null, duration: 0, playing: false, time: 0 },
         seekRequest: null,
         warnings: [],
+        rawVersion: null,
+        runtimeVersion: null,
+        selectionSource: null,
+        compatibility: null,
       };
     case "IMPORT_SUCCEEDED":
       return { ...state, phase: "ready" };
@@ -79,6 +108,20 @@ export function workspaceReducer(
       return { ...state, phase: "error", warnings: [...state.warnings, action.issue] };
     case "REPORT_ISSUE":
       return { ...state, warnings: [...state.warnings, action.issue] };
+    case "IMPORT_VERSION_IDENTIFIED":
+      return {
+        ...state,
+        rawVersion: action.rawVersion,
+        runtimeVersion: action.runtimeVersion,
+        selectionSource: action.selectionSource,
+        compatibility: action.compatibility,
+      };
+    case "RUNTIME_SELECTED":
+      return {
+        ...state,
+        runtimeVersion: action.runtimeVersion,
+        selectionSource: action.selectionSource,
+      };
     case "INITIALIZE_CONTROLS":
       return {
         ...state,

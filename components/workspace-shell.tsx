@@ -33,6 +33,7 @@ import type {
 } from "@/lib/spine/bridge-types";
 import { inferExportScale, type ScaleInference } from "@/lib/spine/scale-inference";
 import {
+  SUPPORTED_SPINE_VERSIONS,
   runtimeDescriptor,
   type SupportedSpineVersion,
 } from "@/lib/spine/runtime-registry";
@@ -116,7 +117,9 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
   const [loadedMetadata, setLoadedMetadata] = useState<SkeletonMetadata | null>(null);
   const [prepared, setPrepared] = useState<PreparedImport | null>(null);
   const [manualRuntimeRequired, setManualRuntimeRequired] = useState(false);
-  const [manualVersion, setManualVersion] = useState<SupportedSpineVersion>("4.2");
+  const [manualVersion, setManualVersion] = useState<SupportedSpineVersion>(
+    SUPPORTED_SPINE_VERSIONS[SUPPORTED_SPINE_VERSIONS.length - 1],
+  );
   const [alphaMode, setAlphaMode] = useState<TextureAlphaMode>("straight");
   const [alphaModeVersion, setAlphaModeVersion] = useState<SupportedSpineVersion | null>(null);
   const sessionRef = useRef<RuntimeSession | null>(null);
@@ -338,6 +341,13 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
       }
       replacePrepared(nextPrepared);
       setAlphaMode(suggestLegacyAlphaMode(bundle));
+      dispatch({
+        type: "IMPORT_VERSION_IDENTIFIED",
+        rawVersion: nextPrepared.detected.raw,
+        runtimeVersion: nextPrepared.detected.majorMinor,
+        selectionSource: nextPrepared.detected.majorMinor ? "automatic" : null,
+        compatibility: nextPrepared.detected.compatibility,
+      });
 
       if (nextPrepared.detected.compatibility === "spine-3.8.75") {
         dispatch({
@@ -463,6 +473,13 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
           <button ref={rightDrawerTriggerRef} type="button" className="button drawer-toggle" aria-expanded={rightDrawerOpen} aria-controls="workspace-export" onClick={() => setRightDrawerOpen((open) => !open)}>
             <PanelRightOpen size={18} aria-hidden="true" /> 导出面板
           </button>
+          {prepared && (
+            <span className="status" role="group" aria-label="Spine 版本信息">
+              素材版本 {state.rawVersion ?? "未识别"} · Runtime {state.runtimeVersion
+                ? `${state.runtimeVersion}（${state.selectionSource === "manual" ? "手动" : "自动"}）`
+                : "尚未选择"}
+            </span>
+          )}
           <span className="status" role="status">{status}</span>
         </div>
       </header>
@@ -526,6 +543,11 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
               {manualRuntimeRequired && prepared && (
                 <form className="manual-runtime" onSubmit={(event) => {
                   event.preventDefault();
+                  dispatch({
+                    type: "RUNTIME_SELECTED",
+                    runtimeVersion: manualVersion,
+                    selectionSource: "manual",
+                  });
                   void startRuntime(
                     prepared.bundle,
                     manualVersion,
@@ -537,10 +559,9 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
                   <label>
                     Runtime 版本
                     <select aria-label="Runtime 版本" value={manualVersion} onChange={(event) => setManualVersion(event.currentTarget.value as SupportedSpineVersion)}>
-                      <option value="3.8">Spine 3.8</option>
-                      <option value="4.0">Spine 4.0</option>
-                      <option value="4.1">Spine 4.1</option>
-                      <option value="4.2">Spine 4.2</option>
+                      {SUPPORTED_SPINE_VERSIONS.map((version) => (
+                        <option key={version} value={version}>Spine {version}</option>
+                      ))}
                     </select>
                   </label>
                   {runtimeDescriptor(manualVersion).requiresExplicitAlphaMode && (
