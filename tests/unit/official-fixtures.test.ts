@@ -11,6 +11,7 @@ const sources = JSON.parse(readFileSync(resolve(fixtureRoot, "SOURCES.json"), "u
   fixtures: Record<string, {
     revision: string;
     editorVersion: string;
+    alphaMode?: "premultiplied" | "straight";
     skeletons?: { json?: string; skel?: string };
     files: Record<string, string | { source: string; sha256: string }>;
   }>;
@@ -44,6 +45,7 @@ describe("官方 Spine fixtures", () => {
 
   it("3.5 JSON、Atlas、PNG 逐文件固定到同一官方 commit 与 SHA-256", () => {
     const fixture = sources.fixtures["3.5"]!;
+    expect(fixture.alphaMode).toBe("premultiplied");
     expect(Object.keys(fixture.files).sort()).toEqual([
       "spineboy-pma.atlas",
       "spineboy-pma.png",

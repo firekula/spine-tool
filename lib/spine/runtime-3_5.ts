@@ -23,6 +23,17 @@ export const runtimeConstructors = {
   SkeletonData: spine.SkeletonData,
 } as unknown as RuntimeConstructorIdentity;
 
+interface LegacySkin {
+  attachments: Array<Record<string, unknown> | undefined>;
+  addAttachment(slotIndex: number, name: string, attachment: unknown): void;
+}
+
+function enumerateAttachments(skin: LegacySkin) {
+  return skin.attachments.flatMap((slot, slotIndex) => (
+    Object.entries(slot ?? {}).map(([name, attachment]) => ({ slotIndex, name, attachment }))
+  ));
+}
+
 const adapter = {
   capabilities,
   atlasMode: "constructor-loader",
@@ -42,6 +53,12 @@ const adapter = {
   isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (
     attachment instanceof spine.RegionAttachment
   ),
+  enumerateAttachments: (skin: LegacySkin) => enumerateAttachments(skin),
+  addSkin: (target: LegacySkin, sourceSkin: LegacySkin) => {
+    for (const { slotIndex, name, attachment } of enumerateAttachments(sourceSkin)) {
+      target.addAttachment(slotIndex, name, attachment);
+    }
+  },
   updateSkeleton: (skeleton: { update(delta: number): void }, delta: number) => skeleton.update(delta),
   updateWorldTransform: (skeleton: { updateWorldTransform(): void }) => skeleton.updateWorldTransform(),
 } as unknown as RuntimeAdapter;

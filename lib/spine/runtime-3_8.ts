@@ -23,6 +23,11 @@ export const capabilities = {
   skeletonBinary: true,
 } as const;
 
+interface ModernSkin {
+  getAttachments(): Array<{ slotIndex: number; name: string; attachment: unknown }>;
+  addSkin(skin: ModernSkin): void;
+}
+
 const adapter = {
   capabilities,
   atlasMode: "constructor-loader",
@@ -43,6 +48,8 @@ const adapter = {
   isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (
     attachment instanceof spine.RegionAttachment
   ),
+  enumerateAttachments: (skin: ModernSkin) => skin.getAttachments(),
+  addSkin: (target: ModernSkin, sourceSkin: ModernSkin) => target.addSkin(sourceSkin),
   updateSkeleton: (skeleton: { update(delta: number): void }, delta: number) => skeleton.update(delta),
   updateWorldTransform: (skeleton: { updateWorldTransform(): void }) => skeleton.updateWorldTransform(),
 } as unknown as RuntimeAdapter;

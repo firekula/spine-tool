@@ -1,4 +1,7 @@
-import type { SupportedSpineVersion } from "./version";
+import {
+  runtimeDescriptor,
+  type SupportedSpineVersion,
+} from "./runtime-registry";
 import {
   normalizeAtlasPageMap,
   normalizeAtlasPageName,
@@ -31,8 +34,12 @@ interface RuntimeAtlas {
 
 interface RuntimeSkin {
   name: string;
-  addSkin(skin: RuntimeSkin): void;
-  getAttachments?(): Array<{ slotIndex: number; name: string; attachment: unknown }>;
+}
+
+interface RuntimeSkinAttachment {
+  slotIndex: number;
+  name: string;
+  attachment: unknown;
 }
 
 interface RuntimeSkeletonData {
@@ -132,6 +139,8 @@ export interface RuntimeAdapter {
     path?: string;
     region?: { name?: string } | null;
   };
+  enumerateAttachments(skin: RuntimeSkin): RuntimeSkinAttachment[];
+  addSkin(target: RuntimeSkin, source: RuntimeSkin): void;
   updateSkeleton(skeleton: RuntimeSkeleton, delta: number): void;
   updateWorldTransform(skeleton: RuntimeSkeleton): void;
 }
@@ -364,7 +373,7 @@ function regionAttachmentMetadata(
   const result: RegionAttachmentMetadata[] = [];
 
   for (const skin of data.skins) {
-    for (const entry of skin.getAttachments?.() ?? []) {
+    for (const entry of adapter.enumerateAttachments(skin)) {
       if (!adapter.isRegionAttachment(entry.attachment)) continue;
       const slot = data.slots[entry.slotIndex];
       if (!slot) continue;
@@ -415,8 +424,9 @@ class RuntimeBridge implements SpineRuntimeBridge {
     ) {
       throw new RuntimeCapabilityError(this.version, "skeletonBinary");
     }
-    if (this.version === "3.8" && input.alphaMode === undefined) {
-      throw new Error("Spine 3.8 纹理的 Alpha 模式需要明确选择（预乘 PMA 或直通 Straight）。");
+    const descriptor = runtimeDescriptor(this.version);
+    if (descriptor.requiresExplicitAlphaMode && input.alphaMode === undefined) {
+      throw new Error(`Spine ${this.version} 纹理的 Alpha 模式需要明确选择（预乘 PMA 或直通 Straight）。`);
     }
 
     const generation = ++this.loadGeneration;
@@ -452,7 +462,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
         context,
         this.adapter,
         cancellation,
-        this.version === "3.8" ? input.alphaMode === "premultiplied" : undefined,
+        descriptor.requiresExplicitAlphaMode ? input.alphaMode === "premultiplied" : undefined,
       );
       releaseObjectUrls();
       if (this.disposed || generation !== this.loadGeneration || cancellation.isCancelled()) {
@@ -549,7 +559,7 @@ class RuntimeBridge implements SpineRuntimeBridge {
       this.skeleton.setSkin(skins[0] ?? data.defaultSkin ?? null);
     } else {
       const composite = new this.adapter.constructors.Skin("bridge-composite");
-      for (const skin of skins) composite.addSkin(skin);
+      for (const skin of skins) this.adapter.addSkin(composite, skin);
       this.skeleton.setSkin(composite);
     }
     this.skeleton.setSlotsToSetupPose();

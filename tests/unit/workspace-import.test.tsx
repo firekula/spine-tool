@@ -127,6 +127,49 @@ describe("WorkspaceShell import integration", () => {
     expect(exportRelease).toHaveBeenCalledTimes(1);
   });
 
+  it("Spine 3.5 先取得 Alpha 确认再把 PMA 选择传入 Runtime session", async () => {
+    const bundle = importBundle();
+    bundle.atlasFile = new File(["atlas"], "spineboy-pma.atlas");
+    bundle.textureFiles = new Map([["spineboy-pma.png", new File(["png"], "spineboy-pma.png")]]);
+    const bridge = fakeBridge();
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: { raw: "3.5.03-beta", majorMinor: "3.5", source: "json-field", supported: true, compatibility: "prerelease" },
+      exportResources: {
+        atlas: { pages: [], regions: [] },
+        textures: new Map(),
+        acquire: vi.fn(),
+        release: vi.fn(),
+      },
+    } satisfies PreparedImport);
+    mocks.createRuntimeSession.mockResolvedValue({
+      bridge,
+      input: {
+        atlasText: "atlas",
+        skeleton: { kind: "json", text: "{}" },
+        textureObjectUrls: new Map(),
+        alphaMode: "premultiplied",
+      },
+      release: vi.fn(),
+    } satisfies RuntimeSession);
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+
+    await screen.findByText("确认 Spine 3.5 Alpha 模式");
+    expect(mocks.createRuntimeSession).not.toHaveBeenCalled();
+    expect(screen.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toHaveProperty("checked", true);
+    await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式并加载预览" }));
+    await waitFor(() => expect(mocks.createRuntimeSession).toHaveBeenCalledWith(
+      bundle,
+      "3.5",
+      { alphaMode: "premultiplied" },
+    ));
+  });
+
   it("Atlas 回退状态下再次选择无效文件也会释放上一批导入资源", async () => {
     const bundle = importBundle();
     const exportRelease = vi.fn();

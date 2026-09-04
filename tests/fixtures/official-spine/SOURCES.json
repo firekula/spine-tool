@@ -9,6 +9,7 @@
     "3.5": {
       "revision": "ab226ab6810e9dc3483f01e1aefa979b2b8864dd",
       "editorVersion": "3.5.03-beta",
+      "alphaMode": "premultiplied",
       "skeletons": {
         "json": "spineboy.json"
       },

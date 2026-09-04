@@ -63,8 +63,8 @@ interface RuntimeSessionDependencies {
   revokeObjectUrl?: (url: string) => void;
 }
 
-/** A filename hint only; the 3.8 UI still requires the user to confirm. */
-export function suggestSpine38AlphaMode(bundle: ImportBundle): TextureAlphaMode {
+/** A filename hint only; legacy Atlas files still require the user to confirm. */
+export function suggestLegacyAlphaMode(bundle: ImportBundle): TextureAlphaMode {
   const names = [bundle.atlasFile.name, ...bundle.textureFiles.keys()];
   return names.some((name) => /(?:^|[._-])pma(?:[._-]|$)/i.test(name))
     ? "premultiplied"

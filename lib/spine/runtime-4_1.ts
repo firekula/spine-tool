@@ -30,6 +30,8 @@ const adapter = {
   isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (
     attachment instanceof runtime.RegionAttachment
   ),
+  enumerateAttachments: (skin: runtime.Skin) => skin.getAttachments(),
+  addSkin: (target: runtime.Skin, sourceSkin: runtime.Skin) => target.addSkin(sourceSkin),
   // 4.1.56's Skeleton has no clock/update method; attachment timing is driven by AnimationState.
   updateSkeleton: () => undefined,
   updateWorldTransform: (skeleton: runtime.Skeleton) => skeleton.updateWorldTransform(),

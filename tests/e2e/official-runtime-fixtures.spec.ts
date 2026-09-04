@@ -22,7 +22,7 @@ async function importOfficialFixture(
   kind: "json" | "skel",
 ): Promise<void> {
   await page.locator('input[type="file"]').setInputFiles(fixtureFiles(version, kind));
-  if (version === "3.8") {
+  if (version === "3.5" || version === "3.8") {
     await expect(page.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toBeChecked();
     await page.getByRole("button", { name: "确认 Alpha 模式并加载预览" }).click();
   }
@@ -33,6 +33,16 @@ for (const version of versions) {
   for (const kind of kinds) {
     test(`官方 Spine ${version} ${kind.toUpperCase()} 由对应 bridge 加载`, async ({ page }) => {
       const errors = collectPageErrors(page);
+      if (version === "3.5") {
+        await page.addInitScript(() => {
+          const original = WebGLRenderingContext.prototype.blendFunc;
+          (window as unknown as { __spineBlendCalls: number[][] }).__spineBlendCalls = [];
+          WebGLRenderingContext.prototype.blendFunc = function (source, destination) {
+            (window as unknown as { __spineBlendCalls: number[][] }).__spineBlendCalls.push([source, destination]);
+            return original.call(this, source, destination);
+          };
+        });
+      }
       await page.goto("/");
       await importOfficialFixture(page, version, kind);
 
@@ -46,6 +56,7 @@ for (const version of versions) {
         await expect(page.getByRole("region", { name: "皮肤列表" }).getByRole("radio", { name: "default" })).toBeVisible();
         await page.getByRole("tab", { name: "插槽" }).click();
         await expect(page.getByRole("region", { name: "插槽列表" }).getByRole("checkbox", { name: "rear_upper_arm" })).toBeVisible();
+        await expect(page.getByText("有效样本").locator("xpath=following-sibling::dd")).not.toHaveText("0");
         await expect.poll(() => page.getByLabel("Spine 动画画布").evaluate(async (canvas) => {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           const target = canvas as HTMLCanvasElement;
@@ -55,6 +66,14 @@ for (const version of versions) {
           gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
           return pixels.some((value, index) => index % 4 === 3 && value > 0);
         })).toBe(true);
+        const premultipliedBlendWasUsed = await page.evaluate(() => {
+          const gl = document.querySelector<HTMLCanvasElement>('canvas[aria-label="Spine 动画画布"]')?.getContext("webgl");
+          const calls = (window as unknown as { __spineBlendCalls: number[][] }).__spineBlendCalls;
+          return Boolean(gl && calls.some(([source, destination]) => (
+            source === gl.ONE && destination === gl.ONE_MINUS_SRC_ALPHA
+          )));
+        });
+        expect(premultipliedBlendWasUsed).toBe(true);
       }
       expect(errors).toEqual([]);
     });
@@ -75,6 +94,9 @@ test("Spine 3.5 SKEL 明确报告 JSON-only 能力限制且不跨版本读取", 
     { name: "spineboy-pma.atlas", mimeType: "text/plain", buffer: await readFile(resolve(directory, "spineboy-pma.atlas")) },
     { name: "spineboy-pma.png", mimeType: "image/png", buffer: await readFile(resolve(directory, "spineboy-pma.png")) },
   ]);
+
+  await expect(page.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toBeChecked();
+  await page.getByRole("button", { name: "确认 Alpha 模式并加载预览" }).click();
 
   await expect(page.getByRole("status").first()).toContainText("预览不可用 · Atlas 仍可导出");
   const issue = page.getByRole("region", { name: "问题中心" });

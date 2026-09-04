@@ -8,9 +8,9 @@ export interface RuntimeDescriptor {
 }
 
 const RUNTIME_DESCRIPTORS = {
-  "3.5": { majorMinor: "3.5", requiresExplicitAlphaMode: false },
-  "3.6": { majorMinor: "3.6", requiresExplicitAlphaMode: false },
-  "3.7": { majorMinor: "3.7", requiresExplicitAlphaMode: false },
+  "3.5": { majorMinor: "3.5", requiresExplicitAlphaMode: true },
+  "3.6": { majorMinor: "3.6", requiresExplicitAlphaMode: true },
+  "3.7": { majorMinor: "3.7", requiresExplicitAlphaMode: true },
   "3.8": { majorMinor: "3.8", requiresExplicitAlphaMode: true },
   "4.0": { majorMinor: "4.0", requiresExplicitAlphaMode: false },
   "4.1": { majorMinor: "4.1", requiresExplicitAlphaMode: false },

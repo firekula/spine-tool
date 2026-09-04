@@ -20,7 +20,7 @@ import type { ImportBundle } from "@/lib/files/import-files";
 import {
   createRuntimeSession,
   prepareImport,
-  suggestSpine38AlphaMode,
+  suggestLegacyAlphaMode,
   type PreparedImport,
   type RuntimeSession,
 } from "@/lib/files/import-workflow";
@@ -32,7 +32,10 @@ import type {
   TextureAlphaMode,
 } from "@/lib/spine/bridge-types";
 import { inferExportScale, type ScaleInference } from "@/lib/spine/scale-inference";
-import type { SupportedSpineVersion } from "@/lib/spine/version";
+import {
+  runtimeDescriptor,
+  type SupportedSpineVersion,
+} from "@/lib/spine/runtime-registry";
 import {
   createInitialWorkspaceState,
   workspaceReducer,
@@ -41,14 +44,15 @@ import {
 type ControlTab = "animation" | "skin" | "slot";
 
 interface AlphaModeFieldsProps {
+  version: SupportedSpineVersion;
   value: TextureAlphaMode;
   onChange(value: TextureAlphaMode): void;
 }
 
-function AlphaModeFields({ value, onChange }: AlphaModeFieldsProps) {
+function AlphaModeFields({ version, value, onChange }: AlphaModeFieldsProps) {
   return (
     <fieldset className="alpha-mode-picker">
-      <legend>Spine 3.8 纹理 Alpha 模式</legend>
+      <legend>Spine {version} 纹理 Alpha 模式</legend>
       <label>
         <input
           type="radio"
@@ -113,8 +117,8 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
   const [prepared, setPrepared] = useState<PreparedImport | null>(null);
   const [manualRuntimeRequired, setManualRuntimeRequired] = useState(false);
   const [manualVersion, setManualVersion] = useState<SupportedSpineVersion>("4.2");
-  const [spine38AlphaMode, setSpine38AlphaMode] = useState<TextureAlphaMode>("straight");
-  const [spine38AlphaRequired, setSpine38AlphaRequired] = useState(false);
+  const [alphaMode, setAlphaMode] = useState<TextureAlphaMode>("straight");
+  const [alphaModeVersion, setAlphaModeVersion] = useState<SupportedSpineVersion | null>(null);
   const sessionRef = useRef<RuntimeSession | null>(null);
   const preparedRef = useRef<PreparedImport | null>(null);
   const operationRef = useRef(0);
@@ -284,7 +288,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     setLoadedMetadata(null);
     setStatus(`正在加载 Spine ${version} Runtime…`);
     try {
-      const nextSession = version === "3.8"
+      const nextSession = runtimeDescriptor(version).requiresExplicitAlphaMode
         ? await createRuntimeSession(bundle, version, { alphaMode })
         : await createRuntimeSession(bundle, version);
       if (operation !== operationRef.current) {
@@ -313,7 +317,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     replacePrepared(null);
     setLoadedMetadata(null);
     setManualRuntimeRequired(false);
-    setSpine38AlphaRequired(false);
+    setAlphaModeVersion(null);
     setStatus("请选择新的文件");
   };
 
@@ -324,7 +328,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     replacePrepared(null);
     setLoadedMetadata(null);
     setManualRuntimeRequired(false);
-    setSpine38AlphaRequired(false);
+    setAlphaModeVersion(null);
     setStatus("正在解析 Atlas 与识别版本…");
     try {
       const nextPrepared = await prepareImport(bundle);
@@ -333,7 +337,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         return;
       }
       replacePrepared(nextPrepared);
-      setSpine38AlphaMode(suggestSpine38AlphaMode(bundle));
+      setAlphaMode(suggestLegacyAlphaMode(bundle));
 
       if (bundle.unusedTextures.length > 0) {
         dispatch({
@@ -369,9 +373,9 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         return;
       }
 
-      if (nextPrepared.detected.majorMinor === "3.8") {
-        setSpine38AlphaRequired(true);
-        setStatus("Atlas 已就绪 · 请确认 Spine 3.8 Alpha 模式");
+      if (runtimeDescriptor(nextPrepared.detected.majorMinor).requiresExplicitAlphaMode) {
+        setAlphaModeVersion(nextPrepared.detected.majorMinor);
+        setStatus(`Atlas 已就绪 · 请确认 Spine ${nextPrepared.detected.majorMinor} Alpha 模式`);
         return;
       }
 
@@ -395,7 +399,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     replacePrepared(null);
     setLoadedMetadata(null);
     setManualRuntimeRequired(false);
-    setSpine38AlphaRequired(false);
+    setAlphaModeVersion(null);
     setStatus("导入失败 · 请修正后重新选择");
     dispatch({ type: "IMPORT_FAILED", issue: { ...issue, subject: issue.subject ?? "所选文件" } });
   };
@@ -497,7 +501,7 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
                   void startRuntime(
                     prepared.bundle,
                     manualVersion,
-                    manualVersion === "3.8" ? spine38AlphaMode : undefined,
+                    runtimeDescriptor(manualVersion).requiresExplicitAlphaMode ? alphaMode : undefined,
                   );
                 }}>
                   <h3>手动选择 Runtime</h3>
@@ -511,24 +515,25 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
                       <option value="4.2">Spine 4.2</option>
                     </select>
                   </label>
-                  {manualVersion === "3.8" && (
+                  {runtimeDescriptor(manualVersion).requiresExplicitAlphaMode && (
                     <>
-                      <AlphaModeFields value={spine38AlphaMode} onChange={setSpine38AlphaMode} />
+                      <AlphaModeFields version={manualVersion} value={alphaMode} onChange={setAlphaMode} />
                       <p>文件名仅用于建议默认值；请确认纹理实际采用的 Alpha 模式。</p>
                     </>
                   )}
                   <button type="submit" className="button">使用所选 Runtime 加载预览</button>
                 </form>
               )}
-              {spine38AlphaRequired && prepared && (
+              {alphaModeVersion && prepared && (
                 <form className="manual-runtime" onSubmit={(event) => {
                   event.preventDefault();
-                  setSpine38AlphaRequired(false);
-                  void startRuntime(prepared.bundle, "3.8", spine38AlphaMode);
+                  const version = alphaModeVersion;
+                  setAlphaModeVersion(null);
+                  void startRuntime(prepared.bundle, version, alphaMode);
                 }}>
-                  <h3>确认 Spine 3.8 Alpha 模式</h3>
-                  <p>Spine 3.8 Atlas 可能不含 pma 字段。文件名仅用于建议默认值；请按纹理实际导出方式确认。</p>
-                  <AlphaModeFields value={spine38AlphaMode} onChange={setSpine38AlphaMode} />
+                  <h3>确认 Spine {alphaModeVersion} Alpha 模式</h3>
+                  <p>Spine {alphaModeVersion} Atlas 可能不含 pma 字段。文件名仅用于建议默认值；请按纹理实际导出方式确认。</p>
+                  <AlphaModeFields version={alphaModeVersion} value={alphaMode} onChange={setAlphaMode} />
                   <button type="submit" className="button">确认 Alpha 模式并加载预览</button>
                 </form>
               )}

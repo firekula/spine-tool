@@ -236,6 +236,7 @@ interface HarnessOptions {
   onTextureCreated?: () => void;
   pages?: Array<{ name: string }>;
   bounds?: { x: number; y: number; width: number; height: number };
+  legacySkinApi?: boolean;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -295,7 +296,19 @@ function createHarness(options: HarnessOptions = {}) {
   class RegionAttachment {}
 
   class Skin {
-    constructor(public readonly name: string) {}
+    readonly attachments: Array<Record<string, unknown> | undefined>;
+
+    constructor(public readonly name: string) {
+      this.attachments = name === "default"
+        ? [{ [options.attachmentKey ?? "body-region"]: visibleAttachment }]
+        : [{ alternate: { width: 16, height: 8, path: "alternate-region" } }];
+      if (options.legacySkinApi) {
+        Object.defineProperties(this, {
+          addSkin: { configurable: true, value: undefined },
+          getAttachments: { configurable: true, value: undefined },
+        });
+      }
+    }
 
     addSkin(skin: Skin) {
       events.push(`skin.add:${skin.name}`);
@@ -305,6 +318,13 @@ function createHarness(options: HarnessOptions = {}) {
       return this.name === "default"
         ? [{ slotIndex: 0, name: options.attachmentKey ?? "body-region", attachment: visibleAttachment }]
         : [];
+    }
+
+    addAttachment(slotIndex: number, name: string, attachment: unknown) {
+      const slot = this.attachments[slotIndex] ?? {};
+      slot[name] = attachment;
+      this.attachments[slotIndex] = slot;
+      events.push(`skin.addAttachment:${slotIndex}:${name}`);
     }
   }
 
@@ -445,7 +465,7 @@ function createHarness(options: HarnessOptions = {}) {
     }
   }
 
-  const runtime: RuntimeAdapter = {
+  const runtime = {
     capabilities: { skeletonJson: true, skeletonBinary: true },
     atlasMode: options.atlasMode ?? "page-setter",
     constructors: {
@@ -462,12 +482,22 @@ function createHarness(options: HarnessOptions = {}) {
       GLTexture,
       SceneRenderer,
     },
-    isRegionAttachment: (attachment): attachment is { width: number; height: number } => (
+    isRegionAttachment: (attachment: unknown): attachment is { width: number; height: number } => (
       attachment === visibleAttachment
     ),
-    updateSkeleton: (skeleton, delta) => (skeleton as Skeleton).update(delta),
+    enumerateAttachments: (skin: Skin) => skin.attachments.flatMap((slot, slotIndex) => (
+      Object.entries(slot ?? {}).map(([name, attachment]) => ({ slotIndex, name, attachment }))
+    )),
+    addSkin: (target: Skin, source: Skin) => {
+      for (const [slotIndex, slot] of source.attachments.entries()) {
+        for (const [name, attachment] of Object.entries(slot ?? {})) {
+          target.addAttachment(slotIndex, name, attachment);
+        }
+      }
+    },
+    updateSkeleton: (skeleton: unknown, delta: number) => (skeleton as Skeleton).update(delta),
     updateWorldTransform: () => events.push("skeleton.world"),
-  };
+  } as unknown as RuntimeAdapter;
 
   const canvas = {
     width: 0,
@@ -530,6 +560,32 @@ function installDeferredImages(): Map<string, { succeed(): void; fail(): void }>
 }
 
 describe("createRuntimeBridge", () => {
+  it("3.5 legacy Skin 由 adapter 枚举 RegionAttachment", async () => {
+    const harness = createHarness({ legacySkinApi: true });
+    const bridge = createRuntimeBridge("3.5", harness.runtime);
+
+    const metadata = await bridge.load({ ...harness.input, alphaMode: "premultiplied" });
+
+    expect(metadata.regionAttachments).toEqual([{
+      skin: "default",
+      slot: "body",
+      name: "body-region",
+      width: 64,
+      height: 32,
+    }]);
+  });
+
+  it("3.5 legacy Skin 组合由 adapter 逐附件复制", async () => {
+    const harness = createHarness({ legacySkinApi: true });
+    const bridge = createRuntimeBridge("3.5", harness.runtime);
+    await bridge.load({ ...harness.input, alphaMode: "premultiplied" });
+
+    expect(() => bridge.setSkins(["default", "alternate"])).not.toThrow();
+    expect(harness.events).toContain("skin.addAttachment:0:body-region");
+    expect(harness.events).toContain("skin.addAttachment:0:alternate");
+    expect(harness.events).toContain("skeleton.skin:bridge-composite");
+  });
+
   it("JSON-only adapter 对 SKEL 返回结构化能力错误且不触碰 WebGL", async () => {
     const harness = createHarness();
     const getContext = vi.fn();
@@ -769,13 +825,15 @@ describe("createRuntimeBridge", () => {
   });
 
   it.each([
-    { alphaMode: "premultiplied", expected: true },
-    { alphaMode: "straight", expected: false },
-  ] as const)("3.8 明确选择 $alphaMode 后传入对应 renderer 混合模式", async ({ alphaMode, expected }) => {
+    { version: "3.5", alphaMode: "premultiplied", expected: true },
+    { version: "3.5", alphaMode: "straight", expected: false },
+    { version: "3.8", alphaMode: "premultiplied", expected: true },
+    { version: "3.8", alphaMode: "straight", expected: false },
+  ] as const)("$version 明确选择 $alphaMode 后传入对应 renderer 混合模式", async ({ version, alphaMode, expected }) => {
     installImmediateImages();
     vi.spyOn(URL, "revokeObjectURL");
     const harness = createHarness({ atlasMode: "constructor-loader", pages: [{ name: "page.png" }] });
-    const bridge = createRuntimeBridge("3.8", harness.runtime);
+    const bridge = createRuntimeBridge(version, harness.runtime);
 
     await bridge.load({
       ...harness.input,
@@ -788,17 +846,17 @@ describe("createRuntimeBridge", () => {
     expect(harness.drawPremultipliedAlpha).toEqual([expected]);
   });
 
-  it("3.8 缺少明确 Alpha 选择时拒绝加载，而不是硬编码 straight", async () => {
+  it.each(["3.5", "3.8"] as const)("%s 缺少明确 Alpha 选择时拒绝加载，而不是硬编码 straight", async (version) => {
     installImmediateImages();
     vi.spyOn(URL, "revokeObjectURL");
     const harness = createHarness({ atlasMode: "constructor-loader", pages: [{ name: "page.png" }] });
-    const bridge = createRuntimeBridge("3.8", harness.runtime);
+    const bridge = createRuntimeBridge(version, harness.runtime);
 
     await expect(bridge.load({
       ...harness.input,
       atlasText: "page.png\nsize: 2,2\nfilter: Linear,Linear\nrepeat: none\n",
       textureObjectUrls: new Map([["page.png", "blob:missing-alpha-mode"]]),
-    })).rejects.toThrow(/3\.8.*Alpha.*明确选择/);
+    })).rejects.toThrow(new RegExp(`${version.replace(".", "\\.")}.*Alpha.*明确选择`));
   });
 
   it("3.8 Runtime 用规范化页面身份查找纹理与页面配置", async () => {
@@ -868,8 +926,8 @@ describe("createRuntimeBridge", () => {
     harness.events.length = 0;
     bridge.setSkins(["default", "alternate"]);
     expect(harness.events).toEqual([
-      "skin.add:default",
-      "skin.add:alternate",
+      "skin.addAttachment:0:body-region",
+      "skin.addAttachment:0:alternate",
       "skeleton.skin:bridge-composite",
     ]);
   });
