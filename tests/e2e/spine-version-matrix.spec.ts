@@ -55,11 +55,15 @@ test("Spine 3.5 SKEL 能力错误后仍生成并读取 Atlas-only ZIP", async ({
     { name: "page.png", mimeType: "image/png", buffer: makePng() },
   ]);
 
-  await page.getByRole("button", { name: "确认 Alpha 模式并加载预览" }).click();
   const center = page.getByRole("region", { name: "问题中心" });
   await expect(center).toContainText("当前 Runtime 不支持 SKEL");
   await expect(center).toContainText("同一 Spine 版本重新导出 JSON");
+  await expect(page.getByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" })).toBeHidden();
+  await expect(page.getByRole("combobox", { name: "Runtime 版本" })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Region（1）" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /导出全部 ZIP/ })).toBeDisabled();
+  await page.getByRole("button", { name: "确认 Alpha 模式用于 Atlas 导出" }).click();
+  await expect(page.getByRole("button", { name: /导出全部 ZIP/ })).toBeEnabled();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: /导出全部 ZIP/ }).click();

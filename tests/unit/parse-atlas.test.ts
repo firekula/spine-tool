@@ -14,6 +14,19 @@ describe("parseAtlas", () => {
     }));
   });
 
+  it("在构造超大 Region 数组前拒绝超过 4096 个 Region", () => {
+    const regions = Array.from({ length: 4_097 }, (_, index) => [
+      `region-${index}`,
+      "bounds: 0,0,1,1",
+      "offsets: 0,0,1,1",
+    ].join("\n"));
+    const source = ["page.png", "size: 1,1", ...regions].join("\n");
+
+    expect(() => parseAtlas(source)).toThrowError(expect.objectContaining({
+      code: "REGION_COUNT_EXCEEDED",
+    }));
+  });
+
   it.each([
     "page.png\nsize: 64,\n",
     "page.png\nsize: ,64\n",
@@ -43,6 +56,38 @@ describe("parseAtlas", () => {
     [newAtlas, { x: 4, y: 8, packedWidth: 20, packedHeight: 12, originalWidth: 32, originalHeight: 40, offsetLeft: 3, offsetBottom: 5, rotation: 90 }],
   ])("把 Atlas 字段标准化", (source, expected) => {
     expect(parseAtlas(source).regions[0]).toMatchObject(expected);
+  });
+
+  it("按官方语义把 rotate:true 记录为打包时逆时针 90°", () => {
+    const document = parseAtlas([
+      "page.png", "size: 8,8", "", "asymmetric",
+      "rotate: true", "xy: 0,0", "size: 2,3", "orig: 2,3", "offset: 0,0",
+    ].join("\n"));
+
+    expect(document.regions[0]).toMatchObject({
+      rotation: 90,
+      packedWidth: 3,
+      packedHeight: 2,
+    });
+  });
+
+  it.each([
+    ["省略 size", ["page.png", "format: RGBA8888", "filter: Linear,Linear"]],
+    ["显式 0,0", ["page.png", "size: 0,0", "filter: Linear,Linear"]],
+  ])("接受官方未知页面尺寸形式：%s", (_label, lines) => {
+    expect(parseAtlas(lines.join("\n")).pages[0]).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it("大小写不敏感解析 page pma 为强类型属性", () => {
+    const document = parseAtlas("page.png\nsize: 8,8\nPmA: TrUe");
+
+    expect(document.pages[0]).toMatchObject({ pma: true });
+    expect(document.pages[0]?.custom).not.toHaveProperty("PmA");
+  });
+
+  it("拒绝非法 page pma 值", () => {
+    expect(() => parseAtlas("page.png\nsize: 8,8\npma: maybe"))
+      .toThrowError(expect.objectContaining({ code: "INVALID_VALUE" }));
   });
 
   it("接受 Spine 4.2 省略 offsets 的未裁边 Region，并补齐零边距与原始尺寸", () => {

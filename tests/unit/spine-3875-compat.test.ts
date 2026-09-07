@@ -26,12 +26,15 @@ describe("Spine 3.8.75 controlled compatibility", () => {
 
   it("3.8.75 SKEL 不修改版本头即可读出最小骨骼", () => {
     const original = readFileSync(resolve(fixtureDirectory, "minimal.skel"));
+    const exactReaderView = Uint8Array.from(original);
+    const before = Uint8Array.from(exactReaderView);
 
-    const data = readBinary(new Uint8Array(original));
+    const data = readBinary(exactReaderView);
 
     expect(data.version).toBe("3.8.75");
     expect(data.bones.map(({ name }) => name)).toEqual(["root"]);
     expect(original.includes(Buffer.from("3.8.75"))).toBe(true);
+    expect(exactReaderView).toEqual(before);
   });
 
   it("保留普通 Spine 3.8 JSON 的既有读取行为", () => {

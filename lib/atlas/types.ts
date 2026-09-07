@@ -5,13 +5,16 @@ export interface AtlasPage {
   height: number;
   /** Texture export scale written by Spine, for example 0.5 for a 50% atlas. */
   scale?: number;
+  /** Whether this page stores premultiplied-alpha RGB; absent on older Atlas files. */
+  pma?: boolean;
   custom: Record<string, string>;
 }
 
 /**
  * A Region normalized across the pre-4.0 and 4.x Atlas field formats.
  * Offsets use the Atlas left/bottom coordinate convention and rotation is
- * expressed as clockwise degrees.
+ * expressed as the counter-clockwise degrees applied while packing. Export
+ * restoration applies the inverse transform.
  */
 export interface AtlasRegion {
   name: string;

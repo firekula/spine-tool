@@ -1,5 +1,11 @@
 import type { AppIssue } from "@/lib/issues/types";
 import { normalizeAtlasPageName } from "@/lib/atlas/page-name";
+import {
+  assertImportFileByteBudget,
+  assertSelectedImportFileCount,
+  ImportResourceLimitError,
+  MAX_TEXTURE_PAGE_COUNT,
+} from "@/lib/files/import-limits";
 
 export interface ImportBundle {
   atlasFile: File;
@@ -41,8 +47,8 @@ function extension(name: string): string {
 
 /**
  * Gets page names without attempting to parse regions or Atlas attributes.
- * A page header is a top-level, non-empty line followed by the required
- * top-level `size:` page attribute. Region attributes are indented.
+ * A page header is a top-level, non-empty line followed by page-only fields
+ * (the official `size:` field may be omitted or `0,0`). Region fields are indented.
  */
 export function extractAtlasPageNames(atlasText: string): string[] {
   const lines = atlasText.replace(/\r\n?/g, "\n").split("\n");
@@ -79,6 +85,13 @@ export function extractAtlasPageNames(atlasText: string): string[] {
     }
 
     if (pageHeader) {
+      if (pages.length >= MAX_TEXTURE_PAGE_COUNT) {
+        throw new ImportResourceLimitError(
+          "TEXTURE_MEMORY_BUDGET_EXCEEDED",
+          candidate,
+          [`Atlas 声明的纹理页超过 ${MAX_TEXTURE_PAGE_COUNT} 页安全预算。`],
+        );
+      }
       pages.push(normalizeAtlasPageName(candidate));
       hasPage = true;
     }
@@ -113,6 +126,7 @@ function resolveTexture(pageName: string, textures: NamedFile[]): NamedFile {
 }
 
 export async function classifyImport(files: File[]): Promise<ImportBundle> {
+  assertSelectedImportFileCount(files);
   const namedFiles = files.map((file) => ({ file, name: normalizeAtlasPageName(file.name) }));
   const atlasFile = requireSingleFile(
     namedFiles.filter(({ name }) => extension(name) === "atlas").map(({ file }) => file),
@@ -125,12 +139,13 @@ export async function classifyImport(files: File[]): Promise<ImportBundle> {
     "SKELETON",
   );
   const skeletonKind = extension(skeletonFile.name) as ImportBundle["skeletonKind"];
-  const atlasText = await atlasFile.text();
   const textures = namedFiles.filter(({ name }) => extension(name) === "png");
   if (textures.length === 0) {
     const message = "未检测到 PNG 纹理文件。请至少选择一张 PNG 纹理。";
     throw new ImportValidationError("MISSING_TEXTURE_FILES", [message], message);
   }
+  assertImportFileByteBudget(atlasFile, skeletonFile, textures.map(({ file }) => file));
+  const atlasText = await atlasFile.text();
   const textureFiles = new Map<string, File>();
   const usedTextures = new Set<File>();
   const missingPages: string[] = [];

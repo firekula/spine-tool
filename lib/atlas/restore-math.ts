@@ -21,6 +21,9 @@ export interface RegionRestorePlan {
   destination: PixelRect;
 }
 
+export const MAX_RESTORE_DIMENSION = 16_384;
+export const MAX_RESTORE_PIXELS = 33_554_432;
+
 function positiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
@@ -31,6 +34,25 @@ function nonNegativeFinite(value: number): boolean {
 
 function fail(region: AtlasRegion, message: string): never {
   throw new Error(`Region「${region.name}」${message}`);
+}
+
+function assertSafeRasterSize(region: AtlasRegion, label: string, size: PixelSize): void {
+  const pixels = size.width * size.height;
+  if (
+    !Number.isSafeInteger(size.width)
+    || !Number.isSafeInteger(size.height)
+    || size.width <= 0
+    || size.height <= 0
+    || size.width > MAX_RESTORE_DIMENSION
+    || size.height > MAX_RESTORE_DIMENSION
+    || !Number.isSafeInteger(pixels)
+    || pixels > MAX_RESTORE_PIXELS
+  ) {
+    fail(
+      region,
+      `的${label}超出浏览器安全预算（最大边长 ${MAX_RESTORE_DIMENSION}px，最大 ${MAX_RESTORE_PIXELS} 像素）`,
+    );
+  }
 }
 
 export function planRegionRestore(
@@ -82,6 +104,9 @@ export function planRegionRestore(
     width: region.originalWidth,
     height: region.originalHeight,
   };
+  assertSafeRasterSize(region, "裁切画布", { width: region.packedWidth, height: region.packedHeight });
+  assertSafeRasterSize(region, "反旋转画布", unrotated);
+  assertSafeRasterSize(region, "原始画布", original);
   const placement = {
     x: region.offsetLeft,
     y: region.originalHeight - region.offsetBottom - unrotated.height,
@@ -92,6 +117,7 @@ export function planRegionRestore(
     width: Math.max(1, Math.round(region.originalWidth * restoreMultiplier)),
     height: Math.max(1, Math.round(region.originalHeight * restoreMultiplier)),
   };
+  assertSafeRasterSize(region, "输出画布", output);
   const outputScaleX = output.width / original.width;
   const outputScaleY = output.height / original.height;
 

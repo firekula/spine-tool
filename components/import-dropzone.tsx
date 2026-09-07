@@ -5,6 +5,7 @@ import {
   type ImportBundle,
   ImportValidationError,
 } from "@/lib/files/import-files";
+import { ImportResourceLimitError } from "@/lib/files/import-limits";
 import { getIssueMessage } from "@/lib/ui/messages";
 
 export interface ImportDropzoneProps {
@@ -33,7 +34,7 @@ function getSelectionSummary(files: File[]): SelectionSummary {
 }
 
 function asIssue(error: unknown): AppIssue {
-  if (error instanceof ImportValidationError) return error;
+  if (error instanceof ImportValidationError || error instanceof ImportResourceLimitError) return error;
   return {
     code: "IMPORT_FAILED",
     severity: "error",

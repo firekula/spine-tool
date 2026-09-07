@@ -49,8 +49,8 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
   },
   MISSING_PAGE: {
     title: "Atlas 缺少纹理页",
-    reason: "Atlas 为空，或页面声明缺少有效名称和尺寸。",
-    action: "请从 Spine 重新导出 Atlas，或补齐页面名称及 size 字段。",
+    reason: "Atlas 为空，或页面声明缺少有效名称。",
+    action: "请从 Spine 重新导出 Atlas，或补齐纹理页名称。页面 size 可以省略或写为 0,0。",
   },
   DUPLICATE_PAGE: {
     title: "Atlas 纹理页重名",
@@ -64,8 +64,8 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
   },
   INVALID_SIZE: {
     title: "Atlas 尺寸无效",
-    reason: "页面或 Region 的宽高不是大于 0 的有限数字。",
-    action: "请修正对应行的尺寸值后重新导入。",
+    reason: "Region 的宽高无效，或页面 size 不是有效的正尺寸/0,0。",
+    action: "请修正对应行；页面 size 可省略或写 0,0，实际尺寸会从 PNG 解码取得。",
   },
   INVALID_VALUE: {
     title: "Atlas 字段格式无效",
@@ -110,7 +110,7 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
   WEBGL_UNAVAILABLE: {
     title: "浏览器无法启动 WebGL",
     reason: "当前浏览器或图形环境没有提供可用的 WebGL context。",
-    action: "请启用硬件加速或改用支持 WebGL 的最新版浏览器；Atlas 仍可继续导出。",
+    action: "请启用硬件加速或改用支持 WebGL 的最新版浏览器；预览与无损 Region 导出都需要 WebGL。",
   },
   PREVIEW_LOAD_FAILED: {
     title: "Spine 预览加载失败",
@@ -122,10 +122,25 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
     reason: "浏览器无法把某张 PNG 解码为图像。",
     action: "请重新导出或替换错误详情指出的 PNG 文件。",
   },
+  INPUT_FILE_SIZE_EXCEEDED: {
+    title: "导入文件字节预算超限",
+    reason: "Atlas、骨骼或 PNG 文件的声明大小超过浏览器安全读取预算。",
+    action: "请拆分 Atlas、减少纹理文件体积，或重新导出较小的素材后再导入。",
+  },
+  TEXTURE_MEMORY_BUDGET_EXCEEDED: {
+    title: "纹理内存预算超限",
+    reason: "纹理页数量或解码后的像素总量超过浏览器安全预算。",
+    action: "请减少一次导入的纹理页，或在 Spine 中使用较小的 Atlas 页面后重试。",
+  },
+  REGION_COUNT_EXCEEDED: {
+    title: "Atlas Region 数量超限",
+    reason: "Atlas 的 Region 数量超过浏览器与非 ZIP64 归档的安全预算。",
+    action: "请在 Spine 中拆分 Atlas，使每份不超过 4096 个 Region 后重新导入。",
+  },
   REGION_OUT_OF_BOUNDS: {
     title: "Region 超出纹理范围",
     reason: "Region 的裁切矩形落在所属 PNG 纹理页之外。",
-    action: "请检查 Atlas 与 PNG 是否来自同一次导出；其他有效 Region 仍会继续处理。",
+    action: "请检查 Atlas 与 PNG 是否来自同一次导出，修正后重新导入；工具会在任何 Region 恢复与导出前停止。",
   },
   MISSING_TEXTURE_PAGE: {
     title: "Region 缺少纹理页",

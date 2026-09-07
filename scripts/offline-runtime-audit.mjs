@@ -1,7 +1,16 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { parse as parseHtml } from "parse5";
 import ts from "typescript";
+
+const offlineAssetManifest = JSON.parse(readFileSync(new URL("./offline-assets.json", import.meta.url), "utf8"));
+if (offlineAssetManifest.version !== 1 || !Array.isArray(offlineAssetManifest.assets)) {
+  throw new Error("离线完整资产 manifest 格式无效。");
+}
+export const trustedOfflineAssetDescriptors = Object.freeze(
+  offlineAssetManifest.assets.map((descriptor) => Object.freeze({ ...descriptor })),
+);
 
 const maxAuditLength = 2 * 1024 * 1024;
 const maxCanonicalizationPasses = 8;
@@ -13,64 +22,64 @@ const maxCanonicalizationPasses = 8;
 export const trustedOfflineRuntimeDescriptors = Object.freeze([
   Object.freeze({
     version: "3_5",
-    path: "assets/runtime-3_5-Bi8Jnn0Q.js",
-    sha256: "d56157c87cfd7fc95ad93c2a9dc2bf1ef68ca3069f942c88c16144799539912a",
+    path: "assets/runtime-3_5-CT34t7z1.js",
+    sha256: "fbce920c46b983b58f8d4f5acaf251ab57eefde1dfd6d23e01c79450067add31",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/afdbbc2044fb56c762d4e2eb54b63b1bb9276a48/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "3_6",
-    path: "assets/runtime-3_6-CLmbD_xL.js",
-    sha256: "af490ed903e2c97bb2aa213f36a8b9d3ac716fcb3e7573f622e6a70e010a6d29",
+    path: "assets/runtime-3_6-BMXfRshV.js",
+    sha256: "c512f5ecaf6e13430951fea93e6118d2a8b5316195bbfaf7a1553f30436786d0",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/654c20e5b0e523040b6366bbd1042510d2645134/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "3_7",
-    path: "assets/runtime-3_7-2FCUw6u4.js",
-    sha256: "77117fe1a5e8ec9844ff6f301f78458c0c37dc4e04184382d37c428d6331448f",
+    path: "assets/runtime-3_7-CS9q-h-B.js",
+    sha256: "56fae6e99ee8deb83917d3ec6fa4cbebc02bc85af7c34e2899a4d61ea06163a4",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/9639bcc81722d7178fd9d1cdc1a3d55a4c91f989/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "3_8",
-    path: "assets/runtime-3_8-DGhdHgL6.js",
-    sha256: "7740adef09520057021b5fe058fc32eb45276f9115b0578918c26a05d73c4ac2",
+    path: "assets/runtime-3_8-BhD5Dcpu.js",
+    sha256: "ed13541b4a78338a1ce52f72e3d32d2ec561dc9ee225c5b141ec52f9c3731178",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "4_0",
-    path: "assets/runtime-4_0-COt9E0L2.js",
-    sha256: "77fc509156b348806d8083da5026d1e95498548b832a65ae55cb38ecf55950b0",
+    path: "assets/runtime-4_0-CrZp25bN.js",
+    sha256: "037dc87d894f291dbffbc67ae9d4c00bc995f22dfb0d089b6a697edba54bd9d2",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
     ]),
   }),
   Object.freeze({
     version: "4_1",
-    path: "assets/runtime-4_1-DTh0mXCj.js",
-    sha256: "19e07935cc8fa3379ca1956048a98083683def133870870a658475ca3dc01d46",
+    path: "assets/runtime-4_1-B2WeTxzT.js",
+    sha256: "f1e3ce106ad53e331f894e1e08e47924569a0c003ef6f2a5a73bbabcf84ee1cd",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
     ]),
   }),
   Object.freeze({
     version: "4_2",
-    path: "assets/runtime-4_2-DCUIXHIn.js",
-    sha256: "31a111f14637a01dfb33eef7a9447e67564d960a7e42bbdaf894aa5b1d366ebe",
+    path: "assets/runtime-4_2-C2PG8nvF.js",
+    sha256: "03030023a5bce1b1f59e73f8d637507ce0253e5a0b3c6bbb07f42659d039b9d8",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
     ]),
   }),
   Object.freeze({
     version: "4_3",
-    path: "assets/runtime-4_3-CyzD6Xgf.js",
-    sha256: "b6d01752e0deabaf55737fa1b91046f8cc570a012cabee1e1bce391205da264a",
+    path: "assets/runtime-4_3-C5zZf3VS.js",
+    sha256: "befaac1d5c3707e0b87e4629838b75776f6dfaa3058648a51d24596f37026e88",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz",
     ]),
@@ -79,15 +88,18 @@ export const trustedOfflineRuntimeDescriptors = Object.freeze([
 
 export const trustedOfflineRuntimeHelperDescriptors = Object.freeze([
   Object.freeze({
-    path: "assets/runtime-factory-VHh44m-_.js",
-    sha256: "26fb7bee3b80ec751eb4cb77c73a8a7050dd408b3ad05f75cfbb7bfc5d78b298",
+    path: "assets/runtime-factory-Cqg1WYks.js",
+    sha256: "50e96da8b5c5368e447a980b22d5bafb6a4067a3daf80c6ad77cfd8cbffc0316",
   }),
 ]);
 
+const trustedMainJavaScript = trustedOfflineAssetDescriptors.find(({ path }) => /^assets\/index-.*\.js$/.test(path));
+if (!trustedMainJavaScript) throw new Error("离线完整资产 manifest 缺少主 JavaScript chunk。");
+
 const trustedDynamicJavaScript = new Map([
-  ["assets/index-YgmOeDMo.js", {
+  [trustedMainJavaScript.path, {
     kind: "vite-modulepreload",
-    sha256: "a6be7668ac7570fda2355b97a5d98312ca2fad1bb10cc9dfee2f1e7c6aebb4b6",
+    sha256: trustedMainJavaScript.sha256,
     allowedStaticExternalUrls: [
       "https://reactjs.org/docs/error-decoder.html?invariant=",
       "http://www.w3.org/1999/xlink",
@@ -238,6 +250,14 @@ function externalHtmlTargets(path, contents) {
       if (node.tagName === "style") {
         occurrences.push(...externalCssTargets(`${path} inline style`, nodeText(node)));
       }
+      if (node.tagName === "meta") {
+        const httpEquiv = attributes.find(({ name }) => name === "http-equiv")?.value.trim().toLowerCase();
+        const content = attributes.find(({ name }) => name === "content")?.value ?? "";
+        if (httpEquiv === "refresh") {
+          const target = /(?:^|;)\s*url\s*=\s*([\s\S]*)$/i.exec(content)?.[1]?.trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2");
+          if (target && isExternalUrl(target)) occurrences.push(`${path}: meta refresh=${target}`);
+        }
+      }
     }
     for (const child of node.childNodes ?? []) visit(child);
     if (node.content) visit(node.content);
@@ -382,7 +402,12 @@ function vitePreloadCallSignature(call) {
 
 function allowsTrustedDynamicTarget(trust, category, call) {
   if (trust?.kind === "spine-runtime" || trust?.kind === "spine-runtime-helper") return true;
-  return trust?.kind === "vite-modulepreload" && category === "fetch" && vitePreloadCallSignature(call);
+  if (trust?.kind !== "vite-modulepreload") return false;
+  if (category === "fetch") return vitePreloadCallSignature(call);
+  // Vite rewrites `new Worker(new URL(..., import.meta.url))` to a resolved
+  // `"" + new URL(...).href` expression. The complete main-chunk hash is the
+  // narrow reviewed boundary for this local Worker target.
+  return category.startsWith("Worker") || category.startsWith("SharedWorker");
 }
 
 function externalJavaScriptTargets(path, contents) {
@@ -412,7 +437,7 @@ function externalJavaScriptTargets(path, contents) {
     occurrences.push(`${path}:${location.line + 1}:${location.character + 1}: JavaScript 无法解析: ${message}`);
   }
 
-  const callableKinds = new Set(["fetch", "importScripts", "sendBeacon", "xhrOpen"]);
+  const callableKinds = new Set(["fetch", "importScripts", "sendBeacon", "xhrOpen", "open", "locationNavigate"]);
   const globalMembers = new Map([
     ["fetch", "fetch"],
     ["importScripts", "importScripts"],
@@ -423,6 +448,8 @@ function externalJavaScriptTargets(path, contents) {
     ["EventSource", "EventSource"],
     ["XMLHttpRequest", "XMLHttpRequest"],
     ["URL", "URL"],
+    ["open", "open"],
+    ["location", "location"],
   ]);
 
   const kindsForProperty = (receiverKinds, name) => {
@@ -434,8 +461,10 @@ function externalJavaScriptTargets(path, contents) {
         const globalMember = globalMembers.get(name);
         if (globalMember) kinds.add(globalMember);
       }
+      if (receiverKind === "document" && name === "location") kinds.add("location");
       if (receiverKind === "navigator" && name === "sendBeacon") kinds.add("sendBeacon");
       if (receiverKind === "xhr" && name === "open") kinds.add("xhrOpen");
+      if (receiverKind === "location" && (name === "assign" || name === "replace")) kinds.add("locationNavigate");
       if (callableKinds.has(receiverKind) && (name === "call" || name === "apply")) {
         kinds.add(`${receiverKind}:${name}`);
       }
@@ -452,7 +481,9 @@ function externalJavaScriptTargets(path, contents) {
   const directIdentifierKinds = (name) => {
     const kinds = new Set();
     if (["globalThis", "self", "window"].includes(name)) kinds.add("global");
+    if (name === "document") kinds.add("document");
     if (name === "navigator") kinds.add("navigator");
+    if (name === "location") kinds.add("location");
     const globalMember = globalMembers.get(name);
     if (globalMember) kinds.add(globalMember);
     if (/^(?:xhr|xmlHttpRequest)$/i.test(name)) kinds.add("xhr");
@@ -666,7 +697,13 @@ function externalJavaScriptTargets(path, contents) {
         for (const argument of argumentsList) auditNetworkArgument(call, argument, kind);
       } else {
         const index = kind === "xhrOpen" ? 1 : 0;
-        const category = kind === "xhrOpen" ? "XMLHttpRequest.open" : kind;
+        const category = kind === "xhrOpen"
+          ? "XMLHttpRequest.open"
+          : kind === "locationNavigate"
+            ? "location 导航"
+            : kind === "open"
+              ? "window.open"
+              : kind;
         auditNetworkArgument(call, argumentsList[index], category);
       }
     }
@@ -725,13 +762,21 @@ function externalJavaScriptTargets(path, contents) {
           if (value !== undefined && isExternalUrl(value)) record(argument, "URL 使用外部目标");
         }
       }
-    } else if (
-      ts.isBinaryExpression(node)
-      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      && ["src", "href"].includes(propertyName(node.left) ?? "")
-    ) {
-      const value = staticString(node.right);
-      if (value !== undefined && isExternalUrl(value)) record(node.right, `${propertyName(node.left)} 使用外部 URL`);
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const left = unwrapExpression(node.left);
+      const leftName = ts.isIdentifier(left) ? left.text : propertyName(left);
+      const receiver = propertyReceiver(left);
+      const navigationTarget = leftName === "location"
+        && resolveValueKinds(left).has("location")
+        || leftName === "href" && receiver && resolveValueKinds(receiver).has("location");
+      if (navigationTarget) {
+        const value = resolvedStaticString(node.right, staticValues);
+        if (value === undefined) record(node.right, "location 导航使用动态目标");
+        else if (!isSafeOfflineUrl(value)) record(node.right, "location 导航使用外部 URL");
+      } else if (["src", "href"].includes(leftName ?? "")) {
+        const value = staticString(node.right);
+        if (value !== undefined && isExternalUrl(value)) record(node.right, `${leftName} 使用外部 URL`);
+      }
     }
     ts.forEachChild(node, visit);
   };

@@ -15,7 +15,13 @@
 | 4.2 | 支持 | 支持 | 4.2 Runtime |
 | 4.3 | 支持 | 支持 | 4.3 Runtime；预发布/Beta 显示警告 |
 
-稳定补丁号按相同 `major.minor` 路由，不跨版本读取。3.5–3.7 的官方 Web Runtime 没有 `SkeletonBinary`，所以这些版本只支持 JSON；手动 Runtime 重试也不会绕过这项能力限制。3.5–3.8 预览前需明确确认 `PMA` 或 `Straight Alpha`，4.x 则优先遵循 Atlas 页级 `pma`。
+稳定补丁号按相同 `major.minor` 路由，不跨版本读取。静态 Runtime registry 为每条版本线显式声明 JSON/SKEL 能力。3.5–3.7 的官方 Web Runtime 没有 `SkeletonBinary`，所以这些版本只支持 JSON；SKEL 会在 Alpha 确认以及 Runtime module、对象 URL、canvas/WebGL 或预览 session 创建前被拒绝，手动 Runtime 重试也不会绕过限制，已经解码的 Atlas-only 资源则继续保留供导出。
+
+JSON 与 SKEL 共用完整版本语法校验。完整的 `major.minor` 或 `major.minor.patch` 可带由非空标识符组成的预发布后缀；`4.3.bad`、`4.3.`、`4.3.9foo`、`4.3.9-` 和 `4.3.0-beta..2` 都是未知/不支持，而不会误进 4.3 Runtime。4.x SKEL 的两个数值 hash 后版本分支由官方完整 `4.3.75-beta` fixture 覆盖，fixture 来源 revision 和 SHA-256 固定在 `tests/fixtures/official-spine/SOURCES.json`。
+
+3.5–3.8 预览和导出前都需用户明确确认 `PMA` 或 `Straight Alpha`；文件名只负责预选。4.x 按每个 Atlas 页大小写不敏感的 `pma: true|false` 分别处理，未声明时按 Straight，因此混合 PMA/Straight 的多页图集也能正确导出。Straight/PMA 页都通过 WebGL 读取 PNG 原始 RGBA 通道；PMA 在任何缩放/PNG 编码前反预乘，Alpha 为 0 时 RGB 归零，最终导出始终是 Straight Alpha PNG。批次只保留当前一个纹理页缓存并在压缩前释放，报告逐 Region 记录 Alpha 来源、输入模式和转换；因此无损导出也要求可用 WebGL。
+
+纹理在浏览器解码前必须通过 PNG 签名与 IHDR 门禁；重置、替换导入或组件卸载会通过 `AbortSignal` 停止后续页面，并关闭已经返回的 `ImageBitmap`。选择阶段最多接受一个 Atlas、一个骨骼文件和 64 张 PNG；在读取全文前分别限制 Atlas 为 8 MiB、JSON/SKEL 为 128 MiB、单张 PNG 为 128 MiB、PNG 累计为 256 MiB，并在第 65 个 Atlas 页面声明立即停止。Atlas 解析和导出层都限制每批最多 4,096 个 Region；此外分别限制解码像素、所有实际使用页的原始 RGBA、恢复 RGBA 与压缩前 PNG/report entry 总量，避免小 Region 数量、未使用 PNG 或伪装扩展名绕过内存预算。
 
 | Editor 版本 | Runtime 来源 | 固定 revision | 来源产物 SHA-256 | 隔离的 core |
 | --- | --- | --- | --- | --- |
@@ -42,10 +48,15 @@
 
 ## 许可
 
-- 3.5 与 3.6 vendor 中 `spine-ts/LICENSE` 的 SHA-256 均为 `d2af98ecac7e4bb6e4c4491fc734db7762b94626b18bcc87c7eac6febd86e1b5`。
-- `vendor/spine-runtime-3.7/LICENSE` 是 3.7 commit 中 `spine-ts/LICENSE` 的未改写副本（SHA-256 `6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39`）。
-- `vendor/spine-runtime-3.8/LICENSE` 是 3.8 commit 中 `spine-ts/LICENSE` 的未改写副本（SHA-256 `6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39`）。
-- `public/licenses/SPINE-RUNTIMES-LICENSE.txt` 是 4.2.120/4.3.9 官方 npm 包 `LICENSE` 的未改写副本（SHA-256 `435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e`）；4.0.31 与 4.1.56 自身的官方 LICENSE 也随各自 npm 包进入依赖树。
+八条 Runtime 实际对应三份不同的官方许可原文。公开副本逐字节匹配下表的固定来源，并随在线 `dist`、离线 ZIP 和源码 ZIP 交付：
+
+| Runtime 版本 | 仓库/发布路径 | SHA-256 | 固定原始来源 |
+| --- | --- | --- | --- |
+| 3.5–3.6 | `public/licenses/SPINE-RUNTIMES-LICENSE-v2.5.txt`（发布包为 `licenses/...`） | `d2af98ecac7e4bb6e4c4491fc734db7762b94626b18bcc87c7eac6febd86e1b5` | `vendor/spine-runtime-3.5/LICENSE` / `3.6/LICENSE` |
+| 3.7–4.1 | `public/licenses/SPINE-RUNTIMES-LICENSE-2019.txt`（发布包为 `licenses/...`） | `6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39` | `vendor/spine-runtime-3.7/LICENSE`；3.8 vendor 与 4.0/4.1 npm 包同文同 hash |
+| 4.2–4.3 | `public/licenses/SPINE-RUNTIMES-LICENSE-2025.txt`（发布包为 `licenses/...`） | `435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e` | `@esotericsoftware/spine-webgl@4.2.120` / `4.3.9` 的 `LICENSE` |
+
+`node_modules` 中的 npm LICENSE 仅作为固定来源验证输入；`node_modules`、npm cache 和依赖树本身不进入任何交付包。离线包的完整资产、launcher 与许可门禁见 [离线包安全与完整性](security-offline.md)。
 
 运行 `npm run verify-runtime-assets` 会进行严格验证：除校验八条来源记录、package alias、package-lock 中 webgl/core 各自的官方 `resolved`/`integrity`、已安装 package 与 core 版本、关键入口及 core 完整 `dist` tree 的 hash、webgl/core LICENSE hash、vendor `SOURCE.json`/ESM 边界，以及一次不落盘的 Vite 构建中八个动态 Runtime chunk 的实际模块来源和 core 隔离外，还会强制从仓库内固定的 3.8 gzip 来源归档与 patch 完整重建，并逐文件比较 JS、declaration、source map、LICENSE 与 SOURCE.json。归档缺失或任一压缩前后 hash、构建工具 pin、patch 语义、上游/补丁后/最终 hash 不匹配都会失败；`npm run package:offline` 的生命周期门禁也会先执行这条严格验证。普通开发可显式运行 `npm run verify-runtime-assets:fast` 跳过重建，但其输出明确标记不得用于 CI 或发布。
 

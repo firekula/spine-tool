@@ -4,11 +4,17 @@ import { exportAllRegions } from "@/lib/export/export-zip";
 import type { ExportResources } from "@/lib/files/import-workflow";
 import type { AppIssue } from "@/lib/issues/types";
 import type { ScaleInference } from "@/lib/spine/scale-inference";
+import type { TextureAlphaMode } from "@/lib/spine/bridge-types";
+import type { SupportedSpineVersion } from "@/lib/spine/runtime-registry";
+
+export type AtlasExportSourceVersion = SupportedSpineVersion | "3.x";
 
 export interface ExportPanelProps {
   resources: ExportResources | null;
   inferredScale: ScaleInference;
   onIssue?: (issue: AppIssue) => void;
+  sourceVersion: AtlasExportSourceVersion | null;
+  legacyAlphaMode?: TextureAlphaMode | null;
 }
 
 function displayMultiplier(value: number): string {
@@ -32,10 +38,16 @@ function downloadZip(blob: Blob): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelProps) {
+export function ExportPanel({
+  resources,
+  inferredScale,
+  onIssue,
+  sourceVersion,
+  legacyAlphaMode = null,
+}: ExportPanelProps) {
   const [globalValue, setGlobalValue] = useState("1");
   const [overrideValues, setOverrideValues] = useState<Map<string, string>>(new Map());
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; phase: "restoring" | "compressing" } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [regionQuery, setRegionQuery] = useState("");
   const [scaleConflictConfirmed, setScaleConflictConfirmed] = useState(false);
@@ -45,12 +57,21 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
   const atlas = resources?.atlas ?? null;
   const textures = resources?.textures ?? null;
   const exporting = progress !== null;
+  const sourceVersionRequired = Boolean(resources && !sourceVersion);
+  const legacyAlphaConfirmationRequired = Boolean(sourceVersion?.startsWith("3.") && !legacyAlphaMode);
 
-  const cancelCurrentExport = useCallback(() => {
+  const cancelCurrentExport = useCallback((): boolean => {
     generationRef.current += 1;
-    abortRef.current?.abort();
-    abortRef.current = null;
+    const active = abortRef.current;
+    if (!active) return false;
+    active.abort();
+    return true;
   }, []);
+
+  const cancelFromUi = useCallback(() => {
+    cancelCurrentExport();
+    setNotice("导出已取消。");
+  }, [cancelCurrentExport]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -61,14 +82,25 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
   }, [cancelCurrentExport]);
 
   useEffect(() => {
-    cancelCurrentExport();
+    const cancelled = cancelCurrentExport();
     setGlobalValue("1");
     setOverrideValues(new Map());
-    setProgress(null);
+    if (!cancelled) setProgress(null);
     setNotice(null);
     setRegionQuery("");
     setScaleConflictConfirmed(false);
   }, [cancelCurrentExport, resources]);
+
+  const configMountedRef = useRef(false);
+  useEffect(() => {
+    if (!configMountedRef.current) {
+      configMountedRef.current = true;
+      return;
+    }
+    if (cancelCurrentExport()) {
+      setNotice("导出配置已变化，旧导出正在取消。");
+    }
+  }, [cancelCurrentExport, inferredScale, legacyAlphaMode, sourceVersion]);
 
   const globalMultiplier = Number(globalValue);
   const globalError = multiplierError(globalValue, false);
@@ -88,6 +120,8 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
     && !globalError
     && overrideErrors.size === 0
     && !exporting
+    && !sourceVersionRequired
+    && !legacyAlphaConfirmationRequired
     && (!requiresScaleConfirmation || scaleConflictConfirmed),
   );
   const overrides = useMemo(() => {
@@ -120,21 +154,24 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
     const generation = generationRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
-    const lease = resources.acquire();
+    let lease: ReturnType<ExportResources["acquire"]> | null = null;
     const isCurrent = () => mountedRef.current
       && generation === generationRef.current
       && !controller.signal.aborted;
     setNotice(null);
-    setProgress({ done: 0, total: atlas.regions.length });
+    setProgress({ done: 0, total: atlas.regions.length, phase: "restoring" });
     try {
+      lease = resources.acquire();
       const result = await exportAllRegions({
         atlas: lease.atlas,
         textures: lease.textures,
         inferredScale,
         globalMultiplier,
         regionOverrides: overrides,
-      }, (done, total) => {
-        if (isCurrent()) setProgress({ done, total });
+        sourceVersion,
+        legacyAlphaMode,
+      }, (done, total, phase = "restoring") => {
+        if (isCurrent()) setProgress({ done, total, phase });
       }, { signal: controller.signal });
       if (!isCurrent()) return;
       downloadZip(result.blob);
@@ -147,8 +184,8 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
       setNotice(`导出失败：${detail}`);
       onIssue?.({ code: "ZIP_FAILED", severity: "error", subject: "spine-regions.zip", details: [detail] });
     } finally {
-      lease.release();
-      if (isCurrent()) {
+      lease?.release();
+      if (mountedRef.current && abortRef.current === controller) {
         abortRef.current = null;
         setProgress(null);
       }
@@ -215,6 +252,13 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
         </label>
       )}
 
+      {legacyAlphaConfirmationRequired && (
+        <p className="export-warning"><TriangleAlert size={16} aria-hidden="true" /> 请先在预览区明确确认 Spine 3.x 纹理 Alpha 模式。</p>
+      )}
+      {sourceVersionRequired && (
+        <p className="export-warning"><TriangleAlert size={16} aria-hidden="true" /> 请先在预览区选择素材对应的 Runtime 版本，再导出 Atlas 子图。</p>
+      )}
+
       <section className="export-region-list" aria-label="Region 单项倍率覆盖">
         <h3>Region（{atlas.regions.length}）</h3>
         <label className="visually-hidden" htmlFor="export-region-search">搜索 Region</label>
@@ -254,7 +298,9 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
         {filteredRegions.length === 0 && <p className="empty-copy">没有匹配的 Region。</p>}
       </section>
 
-      {progress && <p className="export-progress" role="status">已处理 {progress.done} / {progress.total}</p>}
+      {progress && <p className="export-progress" role="status">{progress.phase === "compressing"
+        ? "正在压缩 ZIP…"
+        : `已处理 ${progress.done} / ${progress.total}`}</p>}
       {notice && <p className="export-notice" role="status">{notice}</p>}
       <button type="button" className="button button-primary" disabled={!canExport} onClick={startExport}>
         <Download size={18} aria-hidden="true" /> {exporting
@@ -265,6 +311,16 @@ export function ExportPanel({ resources, inferredScale, onIssue }: ExportPanelPr
               ? "仍要导出全部 ZIP"
               : "导出全部 ZIP"}
       </button>
+      {exporting && (
+        <button
+          type="button"
+          className="button"
+          onClick={cancelFromUi}
+          disabled={Boolean(abortRef.current?.signal.aborted)}
+        >
+          {abortRef.current?.signal.aborted ? "正在取消导出" : "取消导出"}
+        </button>
+      )}
     </div>
   );
 }

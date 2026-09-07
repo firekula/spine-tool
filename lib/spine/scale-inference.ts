@@ -17,6 +17,8 @@ export interface ScaleEvidence {
   aspectRatioError: number;
   weight: number;
   included: boolean;
+  /** Warnings attributable to this exact stable Region evidence. */
+  warnings?: string[];
 }
 
 export interface AtlasPageScaleSample {
@@ -116,9 +118,10 @@ export function inferExportScale(
       ? DISTORTED_SAMPLE_WEIGHT
       : 1;
 
-    if (weight < 1) {
-      warnings.push(`Region「${sample.regionName}」的附件宽高比例与 Atlas 相差超过 3%，该证据已降权。`);
-    }
+    const evidenceWarnings = weight < 1
+      ? [`Region「${sample.regionName}」的附件宽高比例与 Atlas 相差超过 3%，该证据已降权。`]
+      : [];
+    warnings.push(...evidenceWarnings);
 
     return [{
       regionKey: sample.regionKey,
@@ -129,6 +132,7 @@ export function inferExportScale(
       aspectRatioError,
       weight,
       included: true,
+      ...(evidenceWarnings.length > 0 ? { warnings: evidenceWarnings } : {}),
     }];
   });
 

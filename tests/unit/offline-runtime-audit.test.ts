@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { externalRuntimeDependencies } from "../../scripts/offline-runtime-audit.mjs";
 
 describe("离线运行依赖审计", () => {
+  it.each([
+    '<meta http-equiv="refresh" content="0; url=https://example.invalid/redirect">',
+    '<meta content="5;URL=//example.invalid/redirect" http-equiv="REFRESH">',
+  ])("识别 HTML meta refresh 导航：%s", (fixture) => {
+    expect(externalRuntimeDependencies("index.html", fixture)).not.toEqual([]);
+  });
+
   it("在 HTML 分词后识别 URL 属性中的换行实体", () => {
     const fixtures = [
       '<img src="https:&NewLine;//example.invalid/image.png">',
@@ -131,6 +138,20 @@ describe("离线运行依赖审计", () => {
     ["解构 fetch 别名", "const { fetch: request } = globalThis; request(getEndpoint())"],
     ["绑定后的 fetch 别名", "const request = fetch.bind(globalThis); request(getEndpoint())"],
   ])("拒绝合法的全局网络 API 间接调用：%s", (_label, fixture) => {
+    expect(externalRuntimeDependencies("assets/index-a.js", fixture)).not.toEqual([]);
+  });
+
+  it.each([
+    ["window.open", 'window.open("https://example.invalid/popup")'],
+    ["open 动态参数", "open(getTarget())"],
+    ["location.assign", 'location.assign("https://example.invalid/assign")'],
+    ["location.replace", "window.location.replace(getTarget())"],
+    ["location href", 'location.href = "https://example.invalid/href"'],
+    ["window location 动态赋值", "window.location = getTarget()"],
+    ["document location 动态赋值", "document.location = getTarget()"],
+    ["document location href 动态赋值", "document.location.href = getTarget()"],
+    ["计算属性 location", 'window["loc" + "ation"]["hr" + "ef"] = "https://example.invalid/calculated"'],
+  ])("审计弹窗与页面导航目标：%s", (_label, fixture) => {
     expect(externalRuntimeDependencies("assets/index-a.js", fixture)).not.toEqual([]);
   });
 

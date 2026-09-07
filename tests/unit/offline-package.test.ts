@@ -1,11 +1,24 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import JSZip from "jszip";
+import { externalRuntimeDependencies } from "../../scripts/offline-runtime-audit.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -33,21 +46,19 @@ afterEach(() => {
 function makeOfflineBuild(overrides: Partial<Record<"html" | "js" | "css", string>> = {}) {
   const directory = mkdtempSync(join(tmpdir(), "spine-offline-package-"));
   temporaryDirectories.push(directory);
-  mkdirSync(join(directory, "offline"), { recursive: true });
-  mkdirSync(join(directory, "assets"), { recursive: true });
-  mkdirSync(join(directory, "licenses"), { recursive: true });
-  writeFileSync(join(directory, "offline/index.html"), overrides.html ?? '<p>离线中文说明</p><script type="module" src="../assets/index-a.js"></script>');
-  writeFileSync(join(directory, "assets/index-a.js"), overrides.js ?? 'export const offline = "本地相对资源";');
-  writeFileSync(join(directory, "assets/index-a.css"), overrides.css ?? "body { color: black; }");
-  for (const name of readdirSync(join(verifiedBuildDirectory, "assets"))) {
-    if (!/^runtime-.*\.js$/.test(name)) continue;
-    cpSync(join(verifiedBuildDirectory, "assets", name), join(directory, "assets", name));
-  }
-  cpSync(
-    join(verifiedBuildDirectory, "licenses/SPINE-RUNTIMES-LICENSE.txt"),
-    join(directory, "licenses/SPINE-RUNTIMES-LICENSE.txt"),
-  );
+  cpSync(verifiedBuildDirectory, directory, { recursive: true });
+  const mainJs = readdirSync(join(directory, "assets")).find((name) => /^index-.*\.js$/.test(name));
+  const mainCss = readdirSync(join(directory, "assets")).find((name) => /^index-.*\.css$/.test(name));
+  if (overrides.html !== undefined) writeFileSync(join(directory, "offline/index.html"), overrides.html);
+  if (overrides.js !== undefined && mainJs) writeFileSync(join(directory, "assets", mainJs), overrides.js);
+  if (overrides.css !== undefined && mainCss) writeFileSync(join(directory, "assets", mainCss), overrides.css);
   return directory;
+}
+
+function builtAssetPath(directory: string, pattern: RegExp): string {
+  const name = readdirSync(join(directory, "assets")).find((candidate) => pattern.test(candidate));
+  expect(name).toBeDefined();
+  return join(directory, "assets", name!);
 }
 
 function runtimePath(directory: string, version: string) {
@@ -57,9 +68,69 @@ function runtimePath(directory: string, version: string) {
   return join(directory, "assets", runtimeName!);
 }
 
-function packageFixture(directory: string, archive: string) {
+function packageFixture(directory: string, archive: string, extraEnvironment: Record<string, string> = {}) {
   return execFileSync(process.execPath, [script], {
     cwd: repositoryRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      SPINE_OFFLINE_DIST_DIR: directory,
+      SPINE_OFFLINE_ARCHIVE: archive,
+      SPINE_OFFLINE_SKIP_BUILD: "1",
+      ...extraEnvironment,
+    },
+    stdio: "pipe",
+  });
+}
+
+function buildAssetDescriptors(rootDirectory: string) {
+  const descriptors: Array<{ path: string; sha256: string }> = [];
+  const visit = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      const relativePath = relative(rootDirectory, path).replaceAll("\\", "/");
+      descriptors.push({
+        path: relativePath === "offline/index.html" ? "index.html" : relativePath,
+        sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+      });
+    }
+  };
+  visit(rootDirectory);
+  return descriptors.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/**
+ * Test-only reviewed-manifest harness: it lets an intentionally malicious
+ * snapshot reach the package script's secondary semantic audit. The committed
+ * production manifest is never rewritten or learned from a build.
+ */
+function packageFixtureThroughSemanticAudit(directory: string, archive: string) {
+  const harnessRoot = mkdtempSync(join(tmpdir(), "spine-offline-audit-harness-"));
+  temporaryDirectories.push(harnessRoot);
+  symlinkSync(
+    resolve(repositoryRoot, "node_modules"),
+    join(harnessRoot, "node_modules"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  const harnessScripts = join(harnessRoot, "scripts");
+  mkdirSync(harnessScripts);
+  cpSync(script, join(harnessScripts, "package-offline.mjs"));
+  cpSync(
+    resolve(repositoryRoot, "scripts/offline-runtime-audit.mjs"),
+    join(harnessScripts, "offline-runtime-audit.mjs"),
+  );
+  writeFileSync(join(harnessScripts, "offline-assets.json"), JSON.stringify({
+    version: 1,
+    assets: buildAssetDescriptors(directory),
+  }));
+  cpSync(resolve(repositoryRoot, "offline"), join(harnessRoot, "offline"), { recursive: true });
+
+  return execFileSync(process.execPath, [join(harnessScripts, "package-offline.mjs")], {
+    cwd: harnessRoot,
     encoding: "utf8",
     env: {
       ...process.env,
@@ -97,6 +168,572 @@ describe("离线包脚本", () => {
     const secondHash = createHash("sha256").update(readFileSync(archive)).digest("hex");
 
     expect(secondHash).toBe(firstHash);
+  });
+
+  it.each([
+    ["单文件", 1, 8 * 1024 * 1024 + 1, /单文件.*8 MiB|文件大小预算/],
+    ["累计", 4, 8 * 1024 * 1024, /累计.*32 MiB|总大小预算/],
+  ])("在读取前拒绝超过%s快照预算的稀疏额外文件", (_label, count, bytes, expected) => {
+    const directory = makeOfflineBuild();
+    for (let index = 0; index < count; index += 1) {
+      const path = join(directory, `zz-budget-${index}.bin`);
+      writeFileSync(path, "");
+      truncateSync(path, bytes);
+    }
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip"))).toThrow(expected);
+  });
+
+  it("在读取前拒绝超过文件数预算的构建树", () => {
+    const directory = makeOfflineBuild();
+    for (let index = 0; index < 129; index += 1) {
+      writeFileSync(join(directory, `zz-count-${String(index).padStart(3, "0")}.bin`), "");
+    }
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/文件数.*128|文件数量预算/);
+  });
+
+  it.each(["目录数", "深度"])("在递归打开前拒绝超过%s预算的空目录树", (kind) => {
+    const directory = makeOfflineBuild();
+    if (kind === "目录数") {
+      for (let index = 0; index < 65; index += 1) {
+        mkdirSync(join(directory, `zz-directory-${String(index).padStart(3, "0")}`));
+      }
+    } else {
+      let nested = directory;
+      for (let index = 0; index < 17; index += 1) {
+        nested = join(nested, `d${index}`);
+        mkdirSync(nested);
+      }
+    }
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(kind === "目录数" ? /目录数.*64|目录数量预算/ : /目录深度.*16|深度预算/);
+  });
+
+  it("失败打包会先隔离旧目标，不留下可误发的陈旧 ZIP", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-stale-archive-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    writeFileSync(archive, "stale archive");
+    writeFileSync(join(directory, "unreviewed.bin"), "unreviewed");
+
+    expect(() => packageFixture(directory, archive)).toThrow();
+    expect(existsSync(archive)).toBe(false);
+  });
+
+  it("提交 ZIP 前失败时不暴露半成品并清理临时目录", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-atomic-archive-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  beforeArchiveCommit: () => { throw new Error('injected commit failure'); },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+      },
+      stdio: "pipe",
+    })).toThrow(/injected commit failure/);
+
+    expect(existsSync(archive)).toBe(false);
+    expect(readdirSync(archiveDirectory)).toEqual([]);
+  });
+
+  it("提交窗口并发创建同名目标时 fail-closed 且不覆盖对方文件", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-concurrent-archive-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { writeFile } from "node:fs/promises";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  beforeArchiveCommit: () => writeFile(process.env.SPINE_OFFLINE_ARCHIVE, 'concurrent owner'),",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+      },
+      stdio: "pipe",
+    })).toThrow(/EEXIST|并发创建|拒绝覆盖/);
+
+    expect(readFileSync(archive, "utf8")).toBe("concurrent owner");
+  });
+
+  it("临时 ZIP 在关闭后被同大小文件替换时拒绝发布替换 inode", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-temp-replacement-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { readFile, readdir, rename, writeFile } from "node:fs/promises";',
+      'import { dirname, join } from "node:path";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  beforeArchiveCommit: async () => {",
+      "    const parent = dirname(process.env.SPINE_OFFLINE_ARCHIVE);",
+      "    const temporaryDirectory = (await readdir(parent)).find((name) => name.startsWith('.spine-offline-archive-'));",
+      "    if (!temporaryDirectory) throw new Error('temporary archive directory not found');",
+      "    const temporaryArchive = join(parent, temporaryDirectory, 'archive.zip');",
+      "    const original = await readFile(temporaryArchive);",
+      "    const replacement = `${temporaryArchive}.replacement`;",
+      "    await writeFile(replacement, Buffer.alloc(original.byteLength, 0x41));",
+      "    await rename(replacement, temporaryArchive);",
+      "  },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+      },
+      stdio: "pipe",
+    })).toThrow(/identity|替换|临时 ZIP/);
+
+    expect(existsSync(archive)).toBe(false);
+  });
+
+  it("临时 ZIP 被同 inode 同大小覆写时在发布前拒绝", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-temp-overwrite-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { readFile, readdir, writeFile } from "node:fs/promises";',
+      'import { dirname, join } from "node:path";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  beforeArchiveCommit: async () => {",
+      "    const parent = dirname(process.env.SPINE_OFFLINE_ARCHIVE);",
+      "    const temporaryDirectory = (await readdir(parent)).find((name) => name.startsWith('.spine-offline-archive-'));",
+      "    if (!temporaryDirectory) throw new Error('temporary archive directory not found');",
+      "    const temporaryArchive = join(parent, temporaryDirectory, 'archive.zip');",
+      "    const original = await readFile(temporaryArchive);",
+      "    await writeFile(temporaryArchive, Buffer.alloc(original.byteLength, 0x42));",
+      "  },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+      },
+      stdio: "pipe",
+    })).toThrow(/内容|SHA-256|临时 ZIP/);
+
+    expect(existsSync(archive)).toBe(false);
+  });
+
+  it("临时目录在提交窗口被替换时保留替换目录中的 sentinel", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-temp-directory-swap-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { mkdir, readdir, rename, writeFile } from "node:fs/promises";',
+      'import { dirname, join } from "node:path";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  beforeArchiveCommit: async () => {",
+      "    const parent = dirname(process.env.SPINE_OFFLINE_ARCHIVE);",
+      "    const temporaryName = (await readdir(parent)).find((name) => name.startsWith('.spine-offline-archive-'));",
+      "    if (!temporaryName) throw new Error('temporary archive directory not found');",
+      "    const temporaryDirectory = join(parent, temporaryName);",
+      "    await rename(temporaryDirectory, `${temporaryDirectory}.moved`);",
+      "    await mkdir(temporaryDirectory);",
+      "    await writeFile(join(temporaryDirectory, 'sentinel.txt'), 'do not delete');",
+      "  },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+      },
+      stdio: "pipe",
+    })).toThrow();
+
+    const replacementName = readdirSync(archiveDirectory)
+      .find((name) => name.startsWith(".spine-offline-archive-") && !name.endsWith(".moved"));
+    expect(replacementName).toBeDefined();
+    expect(readFileSync(join(archiveDirectory, replacementName!, "sentinel.txt"), "utf8"))
+      .toBe("do not delete");
+  });
+
+  it("旧目标隔离目录在快照后被替换时保留 sentinel 并 fail closed", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-quarantine-directory-swap-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    writeFileSync(archive, "old archive");
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { mkdir, readdir, rename, writeFile } from "node:fs/promises";',
+      'import { dirname, join } from "node:path";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  afterSnapshot: async () => {",
+      "    const parent = dirname(process.env.SPINE_OFFLINE_ARCHIVE);",
+      "    const quarantineName = (await readdir(parent)).find((name) => name.startsWith('.spine-offline-previous-'));",
+      "    if (!quarantineName) throw new Error('quarantine directory not found');",
+      "    const quarantineDirectory = join(parent, quarantineName);",
+      "    await rename(quarantineDirectory, `${quarantineDirectory}.moved`);",
+      "    await mkdir(quarantineDirectory);",
+      "    await writeFile(join(quarantineDirectory, 'sentinel.txt'), 'do not delete');",
+      "  },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+      },
+      stdio: "pipe",
+    })).toThrow(/identity|替换|隔离/);
+
+    const replacementName = readdirSync(archiveDirectory)
+      .find((name) => name.startsWith(".spine-offline-previous-") && !name.endsWith(".moved"));
+    expect(replacementName).toBeDefined();
+    expect(readFileSync(join(archiveDirectory, replacementName!, "sentinel.txt"), "utf8"))
+      .toBe("do not delete");
+  });
+
+  it("旧目标 leaf 在隔离前被目录替换时不递归删除替换内容", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-old-target-swap-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+    writeFileSync(archive, "old archive");
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { mkdir, rename, writeFile } from "node:fs/promises";',
+      'import { join } from "node:path";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  skipBuild: true,",
+      "  afterArchiveTargetOpened: async () => {",
+      "    await rename(process.env.SPINE_OFFLINE_ARCHIVE, `${process.env.SPINE_OFFLINE_ARCHIVE}.original`);",
+      "    await mkdir(process.env.SPINE_OFFLINE_ARCHIVE);",
+      "    await writeFile(join(process.env.SPINE_OFFLINE_ARCHIVE, 'sentinel.txt'), 'do not delete');",
+      "  },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+      },
+      stdio: "pipe",
+    })).toThrow(/identity|替换|普通文件|隔离/);
+
+    const quarantineName = readdirSync(archiveDirectory)
+      .find((name) => name.startsWith(".spine-offline-previous-"));
+    expect(quarantineName).toBeDefined();
+    expect(readFileSync(join(archiveDirectory, quarantineName!, "previous.zip", "sentinel.txt"), "utf8"))
+      .toBe("do not delete");
+  });
+
+  it("成功发布的离线 ZIP 在 POSIX 上允许其他用户读取", () => {
+    const directory = makeOfflineBuild();
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-readable-archive-"));
+    temporaryDirectories.push(archiveDirectory);
+    const archive = join(archiveDirectory, "offline.zip");
+
+    packageFixture(directory, archive);
+
+    if (process.platform !== "win32") {
+      expect(statSync(archive).mode & 0o777).toBe(0o644);
+    }
+  });
+
+  it("输出 ZIP 的父级路径为符号链接时在任何删除或写入前拒绝", () => {
+    const directory = makeOfflineBuild();
+    const actualParent = mkdtempSync(join(tmpdir(), "spine-offline-output-parent-real-"));
+    const linkContainer = mkdtempSync(join(tmpdir(), "spine-offline-output-parent-link-"));
+    temporaryDirectories.push(actualParent, linkContainer);
+    const linkedParent = join(linkContainer, "linked");
+    symlinkSync(actualParent, linkedParent, "dir");
+    const archive = join(linkedParent, "offline.zip");
+    const sentinel = join(actualParent, "offline.zip");
+    writeFileSync(sentinel, "external sentinel");
+
+    expect(() => packageFixture(directory, archive)).toThrow(/祖先|普通目录|符号链接|junction/);
+    expect(readFileSync(sentinel, "utf8")).toBe("external sentinel");
+  });
+
+  it.each(["html", "main-js", "css", "license"])("完整资产 manifest 拒绝 %s 的单字节变化", (kind) => {
+    const directory = makeOfflineBuild();
+    const path = kind === "html"
+      ? join(directory, "offline/index.html")
+      : kind === "main-js"
+        ? builtAssetPath(directory, /^index-.*\.js$/)
+        : kind === "css"
+          ? builtAssetPath(directory, /^index-.*\.css$/)
+          : join(directory, "licenses/SPINE-RUNTIMES-LICENSE-2019.txt");
+    writeFileSync(path, Buffer.concat([readFileSync(path), Buffer.from(" ")]));
+
+    expect(() => packageFixture(directory, join(directory, "offline.zip")))
+      .toThrow(/完整资产|SHA-256|许可文件/);
+  });
+
+  it("完整资产 manifest 拒绝缺失、额外或改名文件", () => {
+    for (const mutation of ["missing", "extra", "renamed"]) {
+      const directory = makeOfflineBuild();
+      const css = builtAssetPath(directory, /^index-.*\.css$/);
+      if (mutation === "missing") rmSync(css);
+      if (mutation === "extra") writeFileSync(join(directory, "assets/unreviewed.bin"), "extra");
+      if (mutation === "renamed") {
+        const bytes = readFileSync(css);
+        rmSync(css);
+        writeFileSync(join(directory, "assets/renamed.css"), bytes);
+      }
+      expect(() => packageFixture(directory, join(directory, "offline.zip")), mutation)
+        .toThrow(/完整资产|文件集合/);
+    }
+  });
+
+  it("离线 ZIP 包含三份原始 Runtime license", () => {
+    const directory = makeOfflineBuild();
+    const archive = join(directory, "offline.zip");
+    packageFixture(directory, archive);
+    const listing = execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { readFile } from "node:fs/promises";',
+      'import JSZip from "jszip";',
+      `const zip = await JSZip.loadAsync(await readFile(${JSON.stringify(archive)}));`,
+      "console.log(Object.keys(zip.files).sort().join('\\n'));",
+    ].join("\n")], { cwd: repositoryRoot, encoding: "utf8" });
+    expect(listing).toContain("licenses/SPINE-RUNTIMES-LICENSE-v2.5.txt");
+    expect(listing).toContain("licenses/SPINE-RUNTIMES-LICENSE-2019.txt");
+    expect(listing).toContain("licenses/SPINE-RUNTIMES-LICENSE-2025.txt");
+  });
+
+  it.each([
+    "SPINE-RUNTIMES-LICENSE-v2.5.txt",
+    "SPINE-RUNTIMES-LICENSE-2019.txt",
+    "SPINE-RUNTIMES-LICENSE-2025.txt",
+  ])("许可 %s 对缺失、整份替换和单字节变化均 fail-closed", (name) => {
+    const alternatives = [
+      "SPINE-RUNTIMES-LICENSE-v2.5.txt",
+      "SPINE-RUNTIMES-LICENSE-2019.txt",
+      "SPINE-RUNTIMES-LICENSE-2025.txt",
+    ].filter((candidate) => candidate !== name);
+    for (const mutation of ["missing", "replaced", "single-byte"] as const) {
+      const directory = makeOfflineBuild();
+      const path = join(directory, "licenses", name);
+      if (mutation === "missing") rmSync(path);
+      if (mutation === "replaced") writeFileSync(path, readFileSync(join(directory, "licenses", alternatives[0]!)));
+      if (mutation === "single-byte") {
+        const bytes = readFileSync(path);
+        bytes[Math.floor(bytes.length / 2)]! ^= 1;
+        writeFileSync(path, bytes);
+      }
+
+      expect(() => packageFixture(directory, join(directory, `${mutation}.zip`)), `${name}: ${mutation}`)
+        .toThrow(/许可文件|完整资产 manifest|SHA-256|文件集合/);
+    }
+  });
+
+  it("launcher 缺失、额外或单字节改变时 fail-closed", () => {
+    for (const mutation of ["missing", "extra", "changed"]) {
+      const directory = makeOfflineBuild();
+      const launcherDirectory = mkdtempSync(join(tmpdir(), "spine-offline-launchers-"));
+      temporaryDirectories.push(launcherDirectory);
+      cpSync(resolve(repositoryRoot, "offline/Start-Offline.ps1"), join(launcherDirectory, "Start-Offline.ps1"));
+      cpSync(resolve(repositoryRoot, "offline/启动离线工具.cmd"), join(launcherDirectory, "启动离线工具.cmd"));
+      if (mutation === "missing") rmSync(join(launcherDirectory, "Start-Offline.ps1"));
+      if (mutation === "extra") writeFileSync(join(launcherDirectory, "extra.ps1"), "exit 1\n");
+      if (mutation === "changed") writeFileSync(
+        join(launcherDirectory, "启动离线工具.cmd"),
+        Buffer.concat([readFileSync(join(launcherDirectory, "启动离线工具.cmd")), Buffer.from(" ")]),
+      );
+
+      expect(() => packageFixture(directory, join(directory, "offline.zip"), {
+        SPINE_OFFLINE_LAUNCHER_DIR: launcherDirectory,
+      }), mutation).toThrow(/launcher|启动脚本|SHA-256|文件集合/i);
+    }
+  });
+
+  it("launcher 根或叶为符号链接时拒绝", () => {
+    const directory = makeOfflineBuild();
+    const actualDirectory = mkdtempSync(join(tmpdir(), "spine-offline-launchers-real-"));
+    const linkParent = mkdtempSync(join(tmpdir(), "spine-offline-launchers-link-"));
+    temporaryDirectories.push(actualDirectory, linkParent);
+    cpSync(resolve(repositoryRoot, "offline/Start-Offline.ps1"), join(actualDirectory, "Start-Offline.ps1"));
+    cpSync(resolve(repositoryRoot, "offline/启动离线工具.cmd"), join(actualDirectory, "启动离线工具.cmd"));
+    const linkedRoot = join(linkParent, "offline");
+    symlinkSync(actualDirectory, linkedRoot, "dir");
+
+    expect(() => packageFixture(directory, join(directory, "root-link.zip"), {
+      SPINE_OFFLINE_LAUNCHER_DIR: linkedRoot,
+    })).toThrow(/普通目录|符号链接|junction/);
+
+    rmSync(linkedRoot);
+    mkdirSync(linkedRoot);
+    cpSync(resolve(repositoryRoot, "offline/Start-Offline.ps1"), join(linkedRoot, "Start-Offline.ps1"));
+    symlinkSync(resolve(repositoryRoot, "offline/启动离线工具.cmd"), join(linkedRoot, "启动离线工具.cmd"));
+    expect(() => packageFixture(directory, join(directory, "leaf-link.zip"), {
+      SPINE_OFFLINE_LAUNCHER_DIR: linkedRoot,
+    })).toThrow(/普通文件|符号链接/);
+  });
+
+  it("launcher 根的父级路径为符号链接时拒绝", () => {
+    const directory = makeOfflineBuild();
+    const actualParent = mkdtempSync(join(tmpdir(), "spine-offline-launcher-parent-real-"));
+    const linkContainer = mkdtempSync(join(tmpdir(), "spine-offline-launcher-parent-link-"));
+    temporaryDirectories.push(actualParent, linkContainer);
+    const actualLauncherDirectory = join(actualParent, "offline");
+    mkdirSync(actualLauncherDirectory);
+    cpSync(resolve(repositoryRoot, "offline/Start-Offline.ps1"), join(actualLauncherDirectory, "Start-Offline.ps1"));
+    cpSync(resolve(repositoryRoot, "offline/启动离线工具.cmd"), join(actualLauncherDirectory, "启动离线工具.cmd"));
+    const linkedParent = join(linkContainer, "parent");
+    symlinkSync(actualParent, linkedParent, "dir");
+
+    expect(() => packageFixture(directory, join(directory, "parent-link.zip"), {
+      SPINE_OFFLINE_LAUNCHER_DIR: join(linkedParent, "offline"),
+    })).toThrow(/祖先|普通目录|符号链接|junction/);
+  });
+
+  it("launcher 目录包含非普通文件时拒绝", () => {
+    if (process.platform === "win32") return;
+    const directory = makeOfflineBuild();
+    const launcherDirectory = mkdtempSync(join(tmpdir(), "spine-offline-launcher-fifo-"));
+    temporaryDirectories.push(launcherDirectory);
+    cpSync(resolve(repositoryRoot, "offline/Start-Offline.ps1"), join(launcherDirectory, "Start-Offline.ps1"));
+    cpSync(resolve(repositoryRoot, "offline/启动离线工具.cmd"), join(launcherDirectory, "启动离线工具.cmd"));
+    execFileSync("mkfifo", [join(launcherDirectory, "blocked.ps1")]);
+
+    expect(() => packageFixture(directory, join(directory, "fifo.zip"), {
+      SPINE_OFFLINE_LAUNCHER_DIR: launcherDirectory,
+    })).toThrow(/普通文件|符号链接|特殊文件/);
+  });
+
+  it("launcher 目录枚举后被同名目录替换时按 identity fail-closed", () => {
+    const directory = makeOfflineBuild();
+    const launcherDirectory = mkdtempSync(join(tmpdir(), "spine-offline-launcher-race-"));
+    const replacementDirectory = mkdtempSync(join(tmpdir(), "spine-offline-launcher-replacement-"));
+    temporaryDirectories.push(launcherDirectory, `${launcherDirectory}-original`, replacementDirectory);
+    for (const target of [launcherDirectory, replacementDirectory]) {
+      cpSync(resolve(repositoryRoot, "offline/Start-Offline.ps1"), join(target, "Start-Offline.ps1"));
+      cpSync(resolve(repositoryRoot, "offline/启动离线工具.cmd"), join(target, "启动离线工具.cmd"));
+    }
+    const moduleUrl = pathToFileURL(script).href;
+
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { rename } from "node:fs/promises";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  launcherDirectory: process.env.SPINE_OFFLINE_LAUNCHER_DIR,",
+      "  skipBuild: true,",
+      "  afterLauncherDirectoryRead: async (path) => {",
+      "    if (path !== process.env.SPINE_OFFLINE_LAUNCHER_DIR) return;",
+      '    await rename(path, `${path}-original`);',
+      "    await rename(process.env.SPINE_OFFLINE_REPLACEMENT_DIR, path);",
+      "  },",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: join(directory, "race.zip"),
+        SPINE_OFFLINE_LAUNCHER_DIR: launcherDirectory,
+        SPINE_OFFLINE_REPLACEMENT_DIR: replacementDirectory,
+      },
+      stdio: "pipe",
+    })).toThrow(/目录.*替换|identity|枚举与读取/);
+  });
+
+  it("launcher 快照后的磁盘内容变化不会改变已校验并写入 ZIP 的 bytes", async () => {
+    const directory = makeOfflineBuild();
+    const launcherDirectory = mkdtempSync(join(tmpdir(), "spine-offline-launcher-snapshot-"));
+    const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-launcher-snapshot-archive-"));
+    temporaryDirectories.push(launcherDirectory, archiveDirectory);
+    for (const name of ["Start-Offline.ps1", "启动离线工具.cmd"]) {
+      cpSync(resolve(repositoryRoot, "offline", name), join(launcherDirectory, name));
+    }
+    const targetPath = join(launcherDirectory, "Start-Offline.ps1");
+    const safeContents = readFileSync(targetPath);
+    const replacement = Buffer.from("Write-Error 'snapshot bypass'\n");
+    const archive = join(archiveDirectory, "offline.zip");
+    const moduleUrl = pathToFileURL(script).href;
+
+    execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      'import { writeFile } from "node:fs/promises";',
+      `const { packageOffline } = await import(${JSON.stringify(moduleUrl)});`,
+      "await packageOffline({",
+      "  outputDirectory: process.env.SPINE_OFFLINE_DIST_DIR,",
+      "  outputArchive: process.env.SPINE_OFFLINE_ARCHIVE,",
+      "  launcherDirectory: process.env.SPINE_OFFLINE_LAUNCHER_DIR,",
+      "  skipBuild: true,",
+      "  afterSnapshot: () => writeFile(process.env.SPINE_OFFLINE_REPLACE_PATH, process.env.SPINE_OFFLINE_REPLACEMENT),",
+      "});",
+    ].join("\n")], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        SPINE_OFFLINE_DIST_DIR: directory,
+        SPINE_OFFLINE_ARCHIVE: archive,
+        SPINE_OFFLINE_LAUNCHER_DIR: launcherDirectory,
+        SPINE_OFFLINE_REPLACE_PATH: targetPath,
+        SPINE_OFFLINE_REPLACEMENT: replacement.toString("utf8"),
+      },
+      stdio: "pipe",
+    });
+
+    expect(readFileSync(targetPath)).toEqual(replacement);
+    const zip = await JSZip.loadAsync(readFileSync(archive));
+    expect(await zip.file("Start-Offline.ps1")!.async("nodebuffer")).toEqual(safeContents);
   });
 
   it.each(["3_5", "3_6", "3_7", "4_3"])("拒绝 Spine %s Runtime chunk 的单字节篡改", (version) => {
@@ -142,7 +779,7 @@ describe("离线包脚本", () => {
 
   it("拒绝精确 helper path 的内容被替换", () => {
     const directory = makeOfflineBuild();
-    const helperPath = join(directory, "assets/runtime-factory-VHh44m-_.js");
+    const helperPath = builtAssetPath(directory, /^runtime-factory-.*\.js$/);
     writeFileSync(helperPath, "export {};\n");
 
     expect(() => packageFixture(directory, join(directory, "offline.zip")))
@@ -152,7 +789,7 @@ describe("离线包脚本", () => {
   it("拒绝符号链接，即使目标是安全的普通文件", () => {
     const directory = makeOfflineBuild();
     const targetPath = join(directory, "assets/safe-target.js");
-    const linkPath = join(directory, "assets/index-a.js");
+    const linkPath = builtAssetPath(directory, /^index-.*\.js$/);
     writeFileSync(targetPath, 'export const target = "safe";\n');
     rmSync(linkPath);
     symlinkSync("safe-target.js", linkPath);
@@ -253,10 +890,33 @@ describe("离线包脚本", () => {
 
   it("拒绝 Windows 大小写不敏感 archive path 碰撞", () => {
     const directory = makeOfflineBuild();
-    writeFileSync(join(directory, "assets/INDEX-A.JS"), "export {};\n");
+    const main = builtAssetPath(directory, /^index-.*\.js$/);
+    writeFileSync(join(directory, "assets", main.split("/").at(-1)!.toUpperCase()), "export {};\n");
 
     expect(() => packageFixture(directory, join(directory, "offline.zip")))
       .toThrow(/碰撞/);
+  });
+
+  it("拒绝两个构建文件映射到同一 archive path", () => {
+    const directory = makeOfflineBuild();
+    writeFileSync(join(directory, "index.html"), readFileSync(join(directory, "offline/index.html")));
+
+    expect(() => packageFixture(directory, join(directory, "duplicate.zip")))
+      .toThrow(/重复归档路径/);
+  });
+
+  it("完整 manifest 拒绝启发式无法识别的主 chunk 计算式外联", () => {
+    const directory = makeOfflineBuild();
+    const mainPath = builtAssetPath(directory, /^index-.*\.js$/);
+    const mutation = [
+      'const member = ["fe", "tch"].join("");',
+      "globalThis[member](String.fromCharCode(104,116,116,112,115,58,47,47,101,120,97,109,112,108,101,46,105,110,118,97,108,105,100));",
+    ].join("\n");
+    expect(externalRuntimeDependencies("assets/calculated.js", mutation)).toEqual([]);
+    writeFileSync(mainPath, mutation);
+
+    expect(() => packageFixture(directory, join(directory, "calculated.zip")))
+      .toThrow(/离线完整资产 manifest.*SHA-256/);
   });
 
   it("大写脚本扩展名仍接受网络能力审计", () => {
@@ -264,7 +924,7 @@ describe("离线包脚本", () => {
     writeFileSync(join(directory, "assets/NETWORK.JS"), 'fetch("https://example.invalid/upper");\n');
 
     expect(() => packageFixture(directory, join(directory, "offline.zip")))
-      .toThrow(/远程运行依赖/);
+      .toThrow(/远程运行依赖|完整资产 manifest/);
   });
 
   it("快照后磁盘替换不会改变已审计并写入 ZIP 的 bytes", async () => {
@@ -272,7 +932,7 @@ describe("离线包脚本", () => {
     const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-snapshot-"));
     temporaryDirectories.push(archiveDirectory);
     const archive = join(archiveDirectory, "offline.zip");
-    const targetPath = join(directory, "assets/index-a.js");
+    const targetPath = builtAssetPath(directory, /^index-.*\.js$/);
     const safeContents = readFileSync(targetPath, "utf8");
     const replacement = [
       'const member = ["fe", "tch"].join("");',
@@ -304,7 +964,8 @@ describe("离线包脚本", () => {
 
     expect(readFileSync(targetPath, "utf8")).toBe(replacement);
     const zip = await JSZip.loadAsync(readFileSync(archive));
-    expect(await zip.file("assets/index-a.js")!.async("string")).toBe(safeContents);
+    const archivePath = targetPath.slice(directory.length + 1).replaceAll("\\", "/");
+    expect(await zip.file(archivePath)!.async("string")).toBe(safeContents);
   });
 
   it.each([
@@ -379,9 +1040,11 @@ describe("离线包脚本", () => {
     ];
 
     for (const [index, overrides] of maliciousBuilds.entries()) {
-      const directory = makeOfflineBuild(overrides);
+      const directory = makeOfflineBuild();
+      const [kind, contents] = Object.entries(overrides)[0];
+      writeFileSync(join(directory, `audit-probe-${index}.${kind}`), contents);
       try {
-        packageFixture(directory, join(directory, "offline.zip"));
+        packageFixtureThroughSemanticAudit(directory, join(directory, "offline.zip"));
       } catch (error) {
         expect(error).toMatchObject({ message: expect.stringMatching(/远程运行依赖/) });
         continue;
@@ -391,11 +1054,7 @@ describe("离线包脚本", () => {
   });
 
   it("允许 blob、data、相对资源和中文文本", () => {
-    const directory = makeOfflineBuild({
-      html: '<!-- <img src=https://example.invalid/comment-only> --><pre>&#60;img src=https://example.invalid/text-only&#62;</pre><p>离线中文说明</p><script type=application/json>{"help":"<img src=https://example.invalid/text-only>"}</script><script type=text/plain>fetch(getEndpoint())</script><button formaction=./submit>提交</button><video poster=./poster.png></video><video poster=data:image/png;base64,AAAA></video><object data=blob:local-document></object><div style="background:url(./background.png)"></div><style>.local{background:url(data:image/png;base64,AAAA)}</style><img src=blob:local-image><img src=data:image/png;base64,AAAA><img src="./first-safe.png" src="https://example.invalid/ignored-duplicate.png"><img srcset="data:text/plain,https://example.invalid/not-a-request 1x, ./local.png 2x"><script src=../assets/index-a.js></script>',
-      js: 'fetch("blob:local-data"); fetch("data:text/plain,本地"); import("./runtime-3_8-Ab12cd34.js"); const xhr = new XMLHttpRequest(); xhr.open(`GET`, `../assets/local.json`); const workerPath = "./worker.js"; new Worker(workerPath); const blobWorker = "blob:local-worker"; new Worker(blobWorker); const moduleBase = import.meta.url; new SharedWorker(new URL("./shared-worker.js", moduleBase));',
-      css: 'body { background-image: url(data:image/png;base64,AAAA); }',
-    });
+    const directory = makeOfflineBuild();
     const archiveDirectory = mkdtempSync(join(tmpdir(), "spine-offline-allowed-"));
     temporaryDirectories.push(archiveDirectory);
 

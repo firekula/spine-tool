@@ -447,11 +447,48 @@ for (const version of supportedVersions) {
 
 assert.equal(runtimeDetails.size, supportedVersions.length, "八个 Spine Runtime entry 必须全部通过来源验证");
 assert.equal(coreDirectories.size, 4, "4.x Runtime 必须解析到四个独立 core package");
-assert.equal(
-  await sha256("public/licenses/SPINE-RUNTIMES-LICENSE.txt"),
-  sourceManifest.runtimes["4.2"].licenseSha256,
-  "公开许可证副本 SHA-256 不匹配",
-);
+const publicLicenseDescriptors = [
+  {
+    path: "public/licenses/SPINE-RUNTIMES-LICENSE-v2.5.txt",
+    sha256: "d2af98ecac7e4bb6e4c4491fc734db7762b94626b18bcc87c7eac6febd86e1b5",
+    sourcePath: "vendor/spine-runtime-3.5/LICENSE",
+    versions: ["3.5", "3.6"],
+  },
+  {
+    path: "public/licenses/SPINE-RUNTIMES-LICENSE-2019.txt",
+    sha256: "6142ee6cc2c03d3a918793e4750ae772bd3755c534d4a35e559e301acf51ec39",
+    sourcePath: "vendor/spine-runtime-3.7/LICENSE",
+    versions: ["3.7", "3.8", "4.0", "4.1"],
+  },
+  {
+    path: "public/licenses/SPINE-RUNTIMES-LICENSE-2025.txt",
+    sha256: "435774fb793b0f67892899fc934f98009e64fd90ad3ab964117274e279a0f50e",
+    sourcePath: "node_modules/@esotericsoftware/spine-webgl-4.2/LICENSE",
+    versions: ["4.2", "4.3"],
+  },
+];
+const publicLicenseHashes = new Set();
+for (const descriptor of publicLicenseDescriptors) {
+  const publicContents = await readFile(resolve(repositoryRoot, descriptor.path));
+  const sourceContents = await readFile(resolve(repositoryRoot, descriptor.sourcePath));
+  assert.equal(sha256Contents(publicContents), descriptor.sha256, `公开许可证 SHA-256 不匹配：${descriptor.path}`);
+  assert.deepEqual(
+    publicContents.at(-1) === 0x0a ? publicContents.subarray(0, -1) : publicContents,
+    sourceContents.at(-1) === 0x0a ? sourceContents.subarray(0, -1) : sourceContents,
+    `公开许可证文本不是固定官方原文：${descriptor.path}`,
+  );
+  for (const version of descriptor.versions) {
+    assert.equal(
+      sourceManifest.runtimes[version].licenseSha256,
+      sha256Contents(sourceContents),
+      `Spine ${version} 与公开许可证版本映射不匹配`,
+    );
+  }
+  assert.ok(documentation.includes(descriptor.path), `文档缺少公开许可证路径：${descriptor.path}`);
+  assert.ok(documentation.includes(descriptor.sha256), `文档缺少公开许可证 SHA-256：${descriptor.path}`);
+  publicLicenseHashes.add(descriptor.sha256);
+}
+assert.equal(publicLicenseHashes.size, 3, "公开 Runtime 许可证必须包含三份不同原文");
 
 const buildResult = await build({
   configFile: false,

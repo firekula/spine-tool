@@ -117,7 +117,9 @@ describe("WorkspaceShell import integration", () => {
       target: { files: [new File(["selection"], "selection.atlas")] },
     });
 
-    await waitFor(() => expect(mocks.prepareImport).toHaveBeenCalledWith(bundle));
+    await waitFor(() => expect(mocks.prepareImport).toHaveBeenCalledWith(bundle, {
+      signal: expect.any(AbortSignal),
+    }));
     expect(mocks.createRuntimeSession).toHaveBeenCalledWith(bundle, "4.2");
     await waitFor(() => expect(bridge.load).toHaveBeenCalled());
     await screen.findByText("Spine 4.2 · 预览已就绪");
@@ -375,19 +377,10 @@ describe("WorkspaceShell import integration", () => {
     await screen.findByText("Spine 4.3 · 预览已就绪");
   });
 
-  it("Spine 3.5 SKEL 能力失败后释放 Runtime session 并保留 Atlas 导出资源", async () => {
+  it("Spine 3.5 SKEL 在 Alpha 确认与 Runtime session 前拒绝并保留 Atlas 导出资源", async () => {
     const bundle = importBundle();
     bundle.skeletonFile = new File([new Uint8Array([1, 2, 3])], "hero.skel");
     bundle.skeletonKind = "skel";
-    const sessionRelease = vi.fn();
-    const bridge = fakeBridge("3.5");
-    vi.mocked(bridge.load).mockRejectedValue(Object.assign(
-      new Error("Spine 3.5 官方 Runtime 不支持 SKEL（二进制）骨骼"),
-      {
-        code: "RUNTIME_CAPABILITY_UNSUPPORTED",
-        details: ["请改用同版本 JSON 导出。工具不会交给其他版本 Runtime 读取。"],
-      },
-    ));
     mocks.classifyImport.mockResolvedValue(bundle);
     mocks.prepareImport.mockResolvedValue({
       bundle,
@@ -406,30 +399,117 @@ describe("WorkspaceShell import integration", () => {
         release: vi.fn(),
       },
     } satisfies PreparedImport);
-    mocks.createRuntimeSession.mockResolvedValue({
-      bridge,
-      input: {
-        atlasText: "atlas",
-        skeleton: { kind: "skel", bytes: new Uint8Array([1, 2, 3]) },
-        textureObjectUrls: new Map([["page.png", "blob:page"]]),
-        alphaMode: "straight",
-      },
-      release: sessionRelease,
-    } satisfies RuntimeSession);
     render(<WorkspaceShell />);
 
     fireEvent.change(document.querySelector('input[type="file"]')!, {
       target: { files: [new File(["selection"], "selection.atlas")] },
     });
-    await screen.findByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" });
-    await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式并加载预览" }));
-
     await screen.findByText("当前 Runtime 不支持 SKEL");
-    expect(sessionRelease).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("combobox", { name: "Runtime 版本" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Spine 3.x 纹理 Alpha 模式" })).toBeNull();
+    expect(mocks.createRuntimeSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("combobox", { name: "Runtime 版本" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Atlas-only 导出设置" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Region（1）" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", true);
+    await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式用于 Atlas 导出" }));
+    expect(mocks.createRuntimeSession).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false);
     expect(screen.getByRole("group", { name: "Spine 版本信息" }).textContent).toContain("Runtime 3.5（自动）");
+    expect(screen.getAllByText(/不会交给其他版本 Runtime 读取/).length).toBeGreaterThan(0);
+  });
+
+  it("后提交的 legacy SKEL 能力拒绝会使先前 pending Runtime 失效", async () => {
+    const bundle = importBundle();
+    bundle.skeletonFile = new File([new Uint8Array([1, 2, 3])], "hero.skel");
+    bundle.skeletonKind = "skel";
+    const lateBridge = fakeBridge("4.3");
+    const lateRelease = vi.fn();
+    let resolveLateSession!: (session: RuntimeSession) => void;
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: { raw: null, majorMinor: null, source: "unknown", supported: false, compatibility: null },
+      exportResources: {
+        atlas: { pages: [{ name: "page.png", width: 1, height: 1, custom: {} }], regions: [] },
+        textures: new Map([["page.png", {} as ImageBitmap]]),
+        acquire: vi.fn(),
+        release: vi.fn(),
+      },
+    } satisfies PreparedImport);
+    mocks.createRuntimeSession.mockImplementationOnce(() => new Promise<RuntimeSession>((resolve) => {
+      resolveLateSession = resolve;
+    }));
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+    const picker = await screen.findByRole("combobox", { name: "Runtime 版本" });
+    await userEvent.setup().selectOptions(picker, "4.3");
+    await userEvent.setup().click(screen.getByRole("button", { name: "使用所选 Runtime 加载预览" }));
+    await waitFor(() => expect(mocks.createRuntimeSession).toHaveBeenCalledWith(bundle, "4.3"));
+
+    await userEvent.setup().selectOptions(picker, "3.5");
+    await userEvent.setup().click(screen.getByRole("button", { name: "使用所选 Runtime 加载预览" }));
+    expect(mocks.createRuntimeSession).toHaveBeenCalledTimes(1);
+    await screen.findByText("当前 Runtime 不支持 SKEL");
+
+    resolveLateSession({
+      bridge: lateBridge,
+      input: {
+        atlasText: "atlas",
+        skeleton: { kind: "skel", bytes: new Uint8Array([1, 2, 3]) },
+        textureObjectUrls: new Map(),
+      },
+      release: lateRelease,
+    });
+    await waitFor(() => expect(lateRelease).toHaveBeenCalledTimes(1));
+    expect(lateBridge.load).not.toHaveBeenCalled();
+    expect(screen.queryByText("Spine 4.3 · 预览已就绪")).toBeNull();
+  });
+
+  it("歧义 SKEL 头可能属于 legacy 3.x 时只允许确认 Atlas 导出 Alpha，不创建任何 Runtime", async () => {
+    const bundle = importBundle();
+    bundle.skeletonFile = new File([new Uint8Array([1, 2, 3])], "ambiguous.skel");
+    bundle.skeletonKind = "skel";
+    mocks.classifyImport.mockResolvedValue(bundle);
+    mocks.prepareImport.mockResolvedValue({
+      bundle,
+      detected: {
+        raw: null,
+        majorMinor: null,
+        source: "skel-header",
+        supported: false,
+        compatibility: null,
+        runtimeBlocked: true,
+        legacyAlphaRequired: true,
+      },
+      exportResources: {
+        atlas: {
+          pages: [{ name: "page.png", width: 1, height: 1, custom: {} }],
+          regions: [{
+            name: "square", pageName: "page.png", rotation: 0, x: 0, y: 0,
+            packedWidth: 1, packedHeight: 1, originalWidth: 1, originalHeight: 1,
+            offsetLeft: 0, offsetBottom: 0, index: -1, custom: {},
+          }],
+        },
+        textures: new Map([["page.png", {} as ImageBitmap]]),
+        acquire: vi.fn(),
+        release: vi.fn(),
+      },
+    } satisfies PreparedImport);
+    render(<WorkspaceShell />);
+
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["selection"], "selection.atlas")] },
+    });
+
+    await screen.findByText("当前 Runtime 不支持 SKEL");
+    expect(screen.queryByRole("combobox", { name: "Runtime 版本" })).toBeNull();
+    expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", true);
+    await userEvent.setup().click(screen.getByRole("button", { name: "确认 Alpha 模式用于 Atlas 导出" }));
+    expect(mocks.createRuntimeSession).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false);
   });
 
   it("Atlas 回退状态下再次选择无效文件也会释放上一批导入资源", async () => {
@@ -463,9 +543,11 @@ describe("WorkspaceShell import integration", () => {
   it("组件卸载后释放迟到的准备结果，不保留 ImageBitmap", async () => {
     const bundle = importBundle();
     const exportRelease = vi.fn();
+    let prepareSignal: AbortSignal | undefined;
     let resolvePrepared!: (prepared: PreparedImport) => void;
     mocks.classifyImport.mockResolvedValueOnce(bundle);
-    mocks.prepareImport.mockImplementationOnce(() => new Promise((resolve) => {
+    mocks.prepareImport.mockImplementationOnce((_bundle, dependencies) => new Promise((resolve) => {
+      prepareSignal = dependencies?.signal;
       resolvePrepared = resolve;
     }));
     const view = render(<WorkspaceShell />);
@@ -474,7 +556,9 @@ describe("WorkspaceShell import integration", () => {
       target: { files: [new File(["selection"], "selection.atlas")] },
     });
     await waitFor(() => expect(mocks.prepareImport).toHaveBeenCalledTimes(1));
+    expect(prepareSignal).toBeInstanceOf(AbortSignal);
     view.unmount();
+    expect(prepareSignal?.aborted).toBe(true);
     resolvePrepared({
       bundle,
       detected: { raw: "4.2.0", majorMinor: "4.2", source: "json-field", supported: true, compatibility: "stable" },

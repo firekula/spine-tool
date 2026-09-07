@@ -19,6 +19,7 @@ import { StatusCenter } from "@/components/status-center";
 import type { ImportBundle } from "@/lib/files/import-files";
 import {
   createRuntimeSession,
+  assertRuntimeCapability,
   prepareImport,
   suggestLegacyAlphaMode,
   type PreparedImport,
@@ -45,7 +46,7 @@ import {
 type ControlTab = "animation" | "skin" | "slot";
 
 interface AlphaModeFieldsProps {
-  version: SupportedSpineVersion;
+  version: SupportedSpineVersion | "3.x";
   value: TextureAlphaMode;
   onChange(value: TextureAlphaMode): void;
 }
@@ -121,9 +122,11 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     SUPPORTED_SPINE_VERSIONS[SUPPORTED_SPINE_VERSIONS.length - 1],
   );
   const [alphaMode, setAlphaMode] = useState<TextureAlphaMode>("straight");
+  const [confirmedLegacyAlphaMode, setConfirmedLegacyAlphaMode] = useState<TextureAlphaMode | null>(null);
   const [alphaModeVersion, setAlphaModeVersion] = useState<SupportedSpineVersion | null>(null);
   const sessionRef = useRef<RuntimeSession | null>(null);
   const preparedRef = useRef<PreparedImport | null>(null);
+  const prepareAbortRef = useRef<AbortController | null>(null);
   const operationRef = useRef(0);
   const leftPanelRef = useRef<HTMLElement>(null);
   const rightPanelRef = useRef<HTMLElement>(null);
@@ -135,6 +138,22 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
   const activeMetadata = suppliedMetadata ?? loadedMetadata;
   const ready = Boolean(activeBridge && activeMetadata && state.phase === "ready");
   const exportResourcesState = prepared?.exportResources ?? null;
+  const exportSourceVersion = prepared?.detected.majorMinor
+    ?? prepared?.detected.legacyCandidate
+    ?? (prepared?.detected.legacyAlphaRequired ? "3.x" : null)
+    ?? state.runtimeVersion;
+  const atlasOnlyRuntimeBlocked = Boolean(
+    prepared
+    && prepared.bundle.skeletonKind === "skel"
+    && (
+      prepared.detected.runtimeBlocked
+      || (
+        exportSourceVersion
+        && exportSourceVersion !== "3.x"
+        && !runtimeDescriptor(exportSourceVersion).capabilities.skel
+      )
+    ),
+  );
   const inferredScale = useMemo<ScaleInference>(() => {
     if (!exportResourcesState) return inferExportScale([]);
     const pageScales = exportResourcesState.atlas.pages.flatMap((page) => (
@@ -171,6 +190,8 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
 
   useEffect(() => () => {
     operationRef.current += 1;
+    prepareAbortRef.current?.abort();
+    prepareAbortRef.current = null;
     sessionRef.current?.release();
     preparedRef.current?.exportResources.release();
   }, []);
@@ -286,10 +307,25 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     bundle: ImportBundle,
     version: SupportedSpineVersion,
     alphaMode?: TextureAlphaMode,
+    detectedSourceVersion: SupportedSpineVersion = version,
   ) => {
     const operation = ++operationRef.current;
     replaceSession(null);
     setLoadedMetadata(null);
+    try {
+      assertRuntimeCapability(bundle, version, detectedSourceVersion);
+    } catch (error) {
+      const issue = issueFrom(error, {
+        code: "RUNTIME_CAPABILITY_UNSUPPORTED",
+        severity: "warning",
+        subject: bundle.skeletonFile.name,
+      });
+      setManualVersion(version);
+      setManualRuntimeRequired(true);
+      setStatus("预览不可用 · Atlas 仍可导出");
+      dispatch({ type: "IMPORT_FAILED", issue });
+      return;
+    }
     setStatus(`正在加载 Spine ${version} Runtime…`);
     try {
       const nextSession = runtimeDescriptor(version).requiresExplicitAlphaMode
@@ -317,16 +353,22 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
   const resetImport = () => {
     if (suppliedBridge) return;
     operationRef.current += 1;
+    prepareAbortRef.current?.abort();
+    prepareAbortRef.current = null;
     dispatch({ type: "IMPORT_STARTED" });
     replaceSession(null);
     replacePrepared(null);
     setLoadedMetadata(null);
     setManualRuntimeRequired(false);
     setAlphaModeVersion(null);
+    setConfirmedLegacyAlphaMode(null);
     setStatus("请选择新的文件");
   };
 
   const handleImport = async (bundle: ImportBundle) => {
+    prepareAbortRef.current?.abort();
+    const prepareController = new AbortController();
+    prepareAbortRef.current = prepareController;
     const operation = ++operationRef.current;
     dispatch({ type: "IMPORT_STARTED" });
     replaceSession(null);
@@ -334,9 +376,10 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
     setLoadedMetadata(null);
     setManualRuntimeRequired(false);
     setAlphaModeVersion(null);
+    setConfirmedLegacyAlphaMode(null);
     setStatus("正在解析 Atlas 与识别版本…");
     try {
-      const nextPrepared = await prepareImport(bundle);
+      const nextPrepared = await prepareImport(bundle, { signal: prepareController.signal });
       if (operation !== operationRef.current) {
         nextPrepared.exportResources.release();
         return;
@@ -391,6 +434,27 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         });
       }
 
+      if (nextPrepared.detected.runtimeBlocked) {
+        if (nextPrepared.detected.legacyCandidate) {
+          setManualVersion(nextPrepared.detected.legacyCandidate);
+        }
+        setManualRuntimeRequired(true);
+        setStatus("预览不可用 · Atlas 仍可导出");
+        dispatch({
+          type: "IMPORT_FAILED",
+          issue: {
+            code: "RUNTIME_CAPABILITY_UNSUPPORTED",
+            severity: "warning",
+            subject: bundle.skeletonFile.name,
+            details: [
+              "SKEL 头同时符合互相冲突的 legacy 与 numeric-hash 布局，无法安全确定素材版本。",
+              "工具不会把该二进制交给任何 Runtime；Atlas Region 仍可在确认 Alpha 后导出。",
+            ],
+          },
+        });
+        return;
+      }
+
       if (!nextPrepared.detected.majorMinor) {
         const code = nextPrepared.detected.raw
           ? "UNSUPPORTED_SPINE_VERSION"
@@ -413,13 +477,28 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         return;
       }
 
+      try {
+        assertRuntimeCapability(bundle, nextPrepared.detected.majorMinor);
+      } catch (error) {
+        const issue = issueFrom(error, {
+          code: "RUNTIME_CAPABILITY_UNSUPPORTED",
+          severity: "warning",
+          subject: bundle.skeletonFile.name,
+        });
+        setManualVersion(nextPrepared.detected.majorMinor);
+        setManualRuntimeRequired(true);
+        setStatus("预览不可用 · Atlas 仍可导出");
+        dispatch({ type: "IMPORT_FAILED", issue });
+        return;
+      }
+
       if (runtimeDescriptor(nextPrepared.detected.majorMinor).requiresExplicitAlphaMode) {
         setAlphaModeVersion(nextPrepared.detected.majorMinor);
         setStatus(`Atlas 已就绪 · 请确认 Spine ${nextPrepared.detected.majorMinor} Alpha 模式`);
         return;
       }
 
-      await startRuntime(bundle, nextPrepared.detected.majorMinor);
+      await startRuntime(bundle, nextPrepared.detected.majorMinor, undefined, nextPrepared.detected.majorMinor);
     } catch (error) {
       if (operation !== operationRef.current) return;
       const issue = issueFrom(error, {
@@ -429,11 +508,15 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
       });
       setStatus("导入失败 · 请修正后重新选择");
       dispatch({ type: "IMPORT_FAILED", issue });
+    } finally {
+      if (prepareAbortRef.current === prepareController) prepareAbortRef.current = null;
     }
   };
 
   const handleImportError = (issue: AppIssue) => {
     operationRef.current += 1;
+    prepareAbortRef.current?.abort();
+    prepareAbortRef.current = null;
     dispatch({ type: "IMPORT_STARTED" });
     replaceSession(null);
     replacePrepared(null);
@@ -542,18 +625,38 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
               <p>{prepared
                 ? "有效 Region 已保留在导出面板中；你可以继续导出，或重新选择完整文件。"
                 : "选择 Atlas、JSON 或 SKEL 以及对应 PNG 纹理页，所有文件仅在本地处理。"}</p>
-              {manualRuntimeRequired && prepared && (
+              {manualRuntimeRequired && prepared && atlasOnlyRuntimeBlocked && exportSourceVersion?.startsWith("3.") && (
                 <form className="manual-runtime" onSubmit={(event) => {
                   event.preventDefault();
+                  setConfirmedLegacyAlphaMode(alphaMode);
+                }}>
+                  <h3>Atlas-only 导出设置</h3>
+                  <p>该 SKEL 不会交给任何 Runtime；请仅确认纹理 Alpha 模式以启用 Atlas Region 导出。</p>
+                  <AlphaModeFields version={exportSourceVersion} value={alphaMode} onChange={(mode) => {
+                    setAlphaMode(mode);
+                    setConfirmedLegacyAlphaMode(null);
+                  }} />
+                  <p>文件名仅用于建议默认值；请确认纹理实际采用的 Alpha 模式。</p>
+                  <button type="submit" className="button">确认 Alpha 模式用于 Atlas 导出</button>
+                </form>
+              )}
+              {manualRuntimeRequired && prepared && !atlasOnlyRuntimeBlocked && (
+                <form className="manual-runtime" onSubmit={(event) => {
+                  event.preventDefault();
+                  const sourceVersion = prepared.detected.majorMinor
+                    ?? prepared.detected.legacyCandidate
+                    ?? manualVersion;
                   dispatch({
                     type: "RUNTIME_SELECTED",
                     runtimeVersion: manualVersion,
                     selectionSource: "manual",
                   });
+                  setConfirmedLegacyAlphaMode(sourceVersion.startsWith("3.") ? alphaMode : null);
                   void startRuntime(
                     prepared.bundle,
                     manualVersion,
                     runtimeDescriptor(manualVersion).requiresExplicitAlphaMode ? alphaMode : undefined,
+                    sourceVersion,
                   );
                 }}>
                   <h3>手动选择 Runtime</h3>
@@ -566,25 +669,35 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
                       ))}
                     </select>
                   </label>
-                  {runtimeDescriptor(manualVersion).requiresExplicitAlphaMode && (
+                  {(runtimeDescriptor(manualVersion).requiresExplicitAlphaMode || exportSourceVersion?.startsWith("3.")) && (
                     <>
-                      <AlphaModeFields version={manualVersion} value={alphaMode} onChange={setAlphaMode} />
+                      <AlphaModeFields version={exportSourceVersion?.startsWith("3.") ? exportSourceVersion : manualVersion} value={alphaMode} onChange={(mode) => {
+                        setAlphaMode(mode);
+                        setConfirmedLegacyAlphaMode(null);
+                      }} />
                       <p>文件名仅用于建议默认值；请确认纹理实际采用的 Alpha 模式。</p>
                     </>
                   )}
                   <button type="submit" className="button">使用所选 Runtime 加载预览</button>
                 </form>
               )}
+              {manualRuntimeRequired && prepared && atlasOnlyRuntimeBlocked && !exportSourceVersion?.startsWith("3.") && (
+                <p className="export-warning">SKEL 版本布局存在歧义，工具不会交给任何 Runtime，也不会猜测导出 Alpha 模式。</p>
+              )}
               {alphaModeVersion && prepared && (
                 <form className="manual-runtime" onSubmit={(event) => {
                   event.preventDefault();
                   const version = alphaModeVersion;
                   setAlphaModeVersion(null);
-                  void startRuntime(prepared.bundle, version, alphaMode);
+                  setConfirmedLegacyAlphaMode(alphaMode);
+                  void startRuntime(prepared.bundle, version, alphaMode, prepared.detected.majorMinor ?? version);
                 }}>
                   <h3>Spine 3.x 纹理 Alpha 模式</h3>
                   <p>Spine {alphaModeVersion} Atlas 可能不含 pma 字段。文件名仅用于建议默认值；请按纹理实际导出方式确认。</p>
-                  <AlphaModeFields version={alphaModeVersion} value={alphaMode} onChange={setAlphaMode} />
+                  <AlphaModeFields version={alphaModeVersion} value={alphaMode} onChange={(mode) => {
+                    setAlphaMode(mode);
+                    setConfirmedLegacyAlphaMode(null);
+                  }} />
                   <button type="submit" className="button">确认 Alpha 模式并加载预览</button>
                 </form>
               )}
@@ -614,6 +727,8 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
         <ExportPanel
           resources={exportResourcesState}
           inferredScale={inferredScale}
+          sourceVersion={exportSourceVersion}
+          legacyAlphaMode={confirmedLegacyAlphaMode}
           onIssue={(issue) => dispatch({ type: "REPORT_ISSUE", issue })}
         />
       </aside>

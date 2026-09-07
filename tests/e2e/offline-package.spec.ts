@@ -35,7 +35,11 @@ test.beforeAll(async () => {
   const filenames = Object.keys(offlineZip.files).filter((name) => !offlineZip.files[name]?.dir).sort();
 
   expect(filenames).toContain("index.html");
-  expect(filenames).toContain("licenses/SPINE-RUNTIMES-LICENSE.txt");
+  expect(filenames).toEqual(expect.arrayContaining([
+    "licenses/SPINE-RUNTIMES-LICENSE-v2.5.txt",
+    "licenses/SPINE-RUNTIMES-LICENSE-2019.txt",
+    "licenses/SPINE-RUNTIMES-LICENSE-2025.txt",
+  ]));
   expect(filenames).toContain("离线使用说明.txt");
   for (const version of ["3_5", "3_6", "3_7", "3_8", "4_0", "4_1", "4_2", "4_3"]) {
     expect(filenames.some((name) => new RegExp(`^assets/runtime-${version}-[A-Za-z0-9_-]+\\.js$`).test(name))).toBe(true);
@@ -86,6 +90,13 @@ test.afterAll(async () => {
 test("离线包在阻断一切外部请求时仍可导入并导出 ZIP", async ({ page }) => {
   const errors = collectPageErrors(page);
   const externalRequests: string[] = [];
+  const externalNavigations: string[] = [];
+  const popups: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame !== page.mainFrame() || frame.url() === "about:blank") return;
+    if (new URL(frame.url()).origin !== origin) externalNavigations.push(frame.url());
+  });
+  page.on("popup", (popup) => popups.push(popup.url()));
   await page.route("**/*", async (route) => {
     const requestUrl = new URL(route.request().url());
     if (requestUrl.origin === origin) {
@@ -105,5 +116,8 @@ test("离线包在阻断一切外部请求时仍可导入并导出 ZIP", async (
   await downloadPromise;
 
   expect(externalRequests).toEqual([]);
+  expect(externalNavigations).toEqual([]);
+  expect(popups).toEqual([]);
+  expect(new URL(page.url()).origin).toBe(origin);
   expect(errors).toEqual([]);
 });

@@ -2,8 +2,12 @@
   "repository": "https://github.com/EsotericSoftware/spine-runtimes",
   "assetDirectory": "examples/spineboy/export",
   "license": {
-    "source": "https://github.com/EsotericSoftware/spine-runtimes/blob/e7dc1435fa4a0083ab431f1b28e083c14a1f5c68/LICENSE",
-    "includedAt": "public/licenses/SPINE-RUNTIMES-LICENSE.txt"
+    "source": "scripts/runtime-sources.json records the exact license source and SHA-256 for each Runtime line",
+    "includedAt": [
+      "public/licenses/SPINE-RUNTIMES-LICENSE-v2.5.txt",
+      "public/licenses/SPINE-RUNTIMES-LICENSE-2019.txt",
+      "public/licenses/SPINE-RUNTIMES-LICENSE-2025.txt"
+    ]
   },
   "fixtures": {
     "3.5": {

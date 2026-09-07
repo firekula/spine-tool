@@ -1,5 +1,6 @@
 import type { AtlasDocument, AtlasPage, AtlasRegion } from "@/lib/atlas/types";
 import { normalizeAtlasPageName } from "@/lib/atlas/page-name";
+import { MAX_ATLAS_REGION_COUNT } from "@/lib/atlas/limits";
 
 type Attribute = { originalKey: string; normalizedKey: string; value: string };
 
@@ -53,6 +54,7 @@ function atlasErrorText(code: string): string {
     case "INCOMPLETE_REGION": return "Region 字段不完整";
     case "INVALID_SIZE": return "尺寸必须是大于 0 的数字";
     case "INVALID_VALUE": return "字段值格式无效";
+    case "REGION_COUNT_EXCEEDED": return "Region 数量超过浏览器安全预算";
     default: return "Atlas 格式无效";
   }
 }
@@ -87,7 +89,7 @@ function normalizeRotation(value: string, line: number, context: ErrorContext): 
   if (/^false$/i.test(value)) return 0;
   const rotation = Number(value);
   if (!Number.isFinite(rotation)) {
-    throw new AtlasParseError("INVALID_VALUE", line, "将 rotate 写为 true、false 或顺时针角度。", context);
+    throw new AtlasParseError("INVALID_VALUE", line, "将 rotate 写为 true、false 或打包时的逆时针角度。", context);
   }
   return ((rotation % 360) + 360) % 360;
 }
@@ -123,8 +125,6 @@ export function parseAtlas(text: string): AtlasDocument {
   const document: AtlasDocument = { pages: [], regions: [] };
   const pageNames = new Set<string>();
   let page: AtlasPage | undefined;
-  let pageLine = 0;
-  let pageHasSize = false;
   let region: RegionDraft | undefined;
   let afterBlank = true;
 
@@ -177,12 +177,6 @@ export function parseAtlas(text: string): AtlasDocument {
     region = undefined;
   };
 
-  const finishPage = (): void => {
-    if (page && !pageHasSize) {
-      throw new AtlasParseError("MISSING_PAGE", pageLine, "在纹理页名称后添加 size: 宽, 高。", { pageName: page.name });
-    }
-  };
-
   const beginPage = (name: string, line: number): void => {
     const normalizedName = normalizeAtlasPageName(name);
     if (pageNames.has(normalizedName)) {
@@ -190,14 +184,20 @@ export function parseAtlas(text: string): AtlasDocument {
     }
     pageNames.add(normalizedName);
     page = { name: normalizedName, width: 0, height: 0, custom: {} };
-    pageLine = line;
-    pageHasSize = false;
     document.pages.push(page);
   };
 
   const beginRegion = (name: string, line: number): void => {
     if (!page) {
-      throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称及其 size 字段。", { regionName: name });
+      throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称。", { regionName: name });
+    }
+    if (document.regions.length >= MAX_ATLAS_REGION_COUNT) {
+      throw new AtlasParseError(
+        "REGION_COUNT_EXCEEDED",
+        line,
+        `将 Atlas 拆分为每份不超过 ${MAX_ATLAS_REGION_COUNT} 个 Region 后重试。`,
+        { pageName: page.name, regionName: name },
+      );
     }
     region = {
       name,
@@ -211,20 +211,30 @@ export function parseAtlas(text: string): AtlasDocument {
 
   const setPageAttribute = (attribute: Attribute, line: number): void => {
     if (!page) {
-      throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称及其 size 字段。");
+      throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称。");
     }
     if (attribute.normalizedKey === "size") {
       const context = { pageName: page.name };
       const [width, height] = numbers(attribute.value, 2, line, context, "size");
-      page.width = positive(width!, line, context);
-      page.height = positive(height!, line, context);
-      pageHasSize = true;
+      const bothUnknown = width === 0 && height === 0;
+      if (!bothUnknown && (width! <= 0 || height! <= 0)) {
+        throw new AtlasParseError("INVALID_SIZE", line, "将页面 size 写为 0,0（未知）或两个大于 0 的数字。", context);
+      }
+      page.width = width!;
+      page.height = height!;
       return;
     }
     if (attribute.normalizedKey === "scale") {
       const context = { pageName: page.name };
       const [scale] = numbers(attribute.value, 1, line, context, "scale");
       page.scale = positive(scale!, line, context);
+      return;
+    }
+    if (attribute.normalizedKey === "pma") {
+      if (!/^(?:true|false)$/i.test(attribute.value)) {
+        throw new AtlasParseError("INVALID_VALUE", line, "将 pma 写为 true 或 false。", { pageName: page.name });
+      }
+      page.pma = /^true$/i.test(attribute.value);
       return;
     }
     page.custom[attribute.originalKey] = attribute.value;
@@ -301,7 +311,7 @@ export function parseAtlas(text: string): AtlasDocument {
     const attribute = attributeOf(rawLine);
     if (attribute) {
       if (!page) {
-        throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称及其 size 字段。");
+        throw new AtlasParseError("MISSING_PAGE", line, "先声明纹理页名称。");
       }
       if (region) setRegionAttribute(attribute, line);
       else setPageAttribute(attribute, line);
@@ -314,7 +324,6 @@ export function parseAtlas(text: string): AtlasDocument {
       beginPage(name, line);
     } else if (afterBlank && classifyFollowingAttributeBlock(lines, index) === "page") {
       finishRegion();
-      finishPage();
       beginPage(name, line);
     } else {
       finishRegion();
@@ -324,9 +333,8 @@ export function parseAtlas(text: string): AtlasDocument {
   }
 
   finishRegion();
-  finishPage();
   if (document.pages.length === 0) {
-    throw new AtlasParseError("MISSING_PAGE", 1, "添加纹理页名称及 size: 宽, 高。");
+    throw new AtlasParseError("MISSING_PAGE", 1, "添加纹理页名称。");
   }
   return document;
 }

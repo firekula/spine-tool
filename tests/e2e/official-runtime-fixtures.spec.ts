@@ -115,15 +115,18 @@ for (const version of ["3.5", "3.6", "3.7"] as const) {
       { name: "spineboy-pma.png", mimeType: "image/png", buffer: await readFile(resolve(directory, "spineboy-pma.png")) },
     ]);
 
-    await expect(page.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toBeChecked();
-    await page.getByRole("button", { name: "确认 Alpha 模式并加载预览" }).click();
-
     await expect(page.getByRole("status").first()).toContainText("预览不可用 · Atlas 仍可导出");
     const issue = page.getByRole("region", { name: "问题中心" });
     await expect(issue).toContainText("当前 Runtime 不支持 SKEL");
-    await expect(issue).toContainText(`Spine ${version} 官方 Runtime 不支持 SKEL`);
+    await expect(issue).toContainText(`Spine ${version} 官方 Web Runtime 不支持 SKEL`);
     await expect(issue).toContainText("不会交给其他版本 Runtime");
     await expect(issue).toContainText("RUNTIME_CAPABILITY_UNSUPPORTED");
+    await expect(page.getByRole("button", { name: "确认 Alpha 模式并加载预览" })).toBeHidden();
+    await expect(page.getByRole("combobox", { name: "Runtime 版本" })).toBeHidden();
+    await expect(page.getByRole("radio", { name: "预乘 Alpha（PMA）" })).toBeChecked();
+    await expect(page.getByRole("button", { name: /导出全部 ZIP/ })).toBeDisabled();
+    await page.getByRole("button", { name: "确认 Alpha 模式用于 Atlas 导出" }).click();
+    await expect(page.getByRole("button", { name: /导出全部 ZIP/ })).toBeEnabled();
   });
 }
 

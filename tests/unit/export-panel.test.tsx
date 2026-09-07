@@ -30,7 +30,7 @@ const inferredScale: ScaleInference = {
 };
 
 function renderPanel() {
-  return render(<ExportPanel resources={resources(atlas)} inferredScale={inferredScale} />);
+  return render(<ExportPanel resources={resources(atlas)} inferredScale={inferredScale} sourceVersion="4.2" />);
 }
 
 function resources(document: AtlasDocument): ExportResources {
@@ -60,6 +60,47 @@ afterEach(() => {
 });
 
 describe("ExportPanel", () => {
+  it("素材版本未识别时阻断导出，避免静默猜测 Alpha 语义", () => {
+    render(<ExportPanel
+      resources={resources(atlas)}
+      inferredScale={inferredScale}
+      sourceVersion={null}
+    />);
+
+    expect(screen.getByText("请先在预览区选择素材对应的 Runtime 版本，再导出 Atlas 子图。")) .toBeTruthy();
+    expect(screen.getByRole("button", { name: "导出全部 ZIP" })).toHaveProperty("disabled", true);
+  });
+
+  it("Spine 3.x 未确认 Alpha 前阻断导出，确认值会传给导出层", async () => {
+    mocks.exportAllRegions.mockResolvedValueOnce({
+      blob: new Blob(["zip"]),
+      report: { version: 1, inferredScale, summary: { successful: 0, skipped: 0, failed: 0, total: 0 }, regions: [] },
+      issues: [],
+    } satisfies ExportAllResult);
+    const view = render(<ExportPanel
+      resources={resources(atlas)}
+      inferredScale={inferredScale}
+      sourceVersion="3.8"
+      legacyAlphaMode={null}
+    />);
+
+    expect(screen.getByText("请先在预览区明确确认 Spine 3.x 纹理 Alpha 模式。")) .toBeTruthy();
+    expect(screen.getByRole("button", { name: "导出全部 ZIP" })).toHaveProperty("disabled", true);
+
+    view.rerender(<ExportPanel
+      resources={resources(atlas)}
+      inferredScale={inferredScale}
+      sourceVersion="3.8"
+      legacyAlphaMode="premultiplied"
+    />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "导出全部 ZIP" }));
+    expect(mocks.exportAllRegions).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceVersion: "3.8", legacyAlphaMode: "premultiplied" }),
+      expect.any(Function),
+      expect.any(Object),
+    );
+  });
+
   it("可搜索很长的 Region 名称且保留完整 title", () => {
     renderPanel();
 
@@ -113,7 +154,7 @@ describe("ExportPanel", () => {
       },
       issues: [],
     } satisfies ExportAllResult);
-    render(<ExportPanel resources={resources(atlas)} inferredScale={conflict} />);
+    render(<ExportPanel resources={resources(atlas)} inferredScale={conflict} sourceVersion="4.2" />);
 
     const button = screen.getByRole("button", { name: "确认倍率后导出全部 ZIP" });
     expect(button).toHaveProperty("disabled", true);
@@ -136,11 +177,11 @@ describe("ExportPanel", () => {
   });
 
   it("切换到新 Atlas 时清除搜索和倍率编辑状态", async () => {
-    const view = render(<ExportPanel resources={resources(atlas)} inferredScale={inferredScale} />);
+    const view = render(<ExportPanel resources={resources(atlas)} inferredScale={inferredScale} sourceVersion="4.2" />);
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索 Region" }), { target: { value: "very-long" } });
     fireEvent.change(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" }), { target: { value: "3" } });
 
-    view.rerender(<ExportPanel resources={resources({ ...atlas, regions: [...atlas.regions] })} inferredScale={inferredScale} />);
+    view.rerender(<ExportPanel resources={resources({ ...atlas, regions: [...atlas.regions] })} inferredScale={inferredScale} sourceVersion="4.2" />);
 
     await waitFor(() => expect(screen.getByRole("searchbox", { name: "搜索 Region" })).toHaveProperty("value", ""));
     expect(screen.getByRole("textbox", { name: "全局倍率（乘在自动倍率之后）" })).toHaveProperty("value", "1");
@@ -168,6 +209,7 @@ describe("ExportPanel", () => {
     render(<ExportPanel
       resources={resources(atlas)}
       inferredScale={inferredScale}
+      sourceVersion="4.2"
       onIssue={onIssue}
     />);
 
@@ -176,5 +218,120 @@ describe("ExportPanel", () => {
     await screen.findByText("导出完成：成功 1 项，跳过 1 项，失败 1 项。ZIP 已包含详细报告。");
     expect(onIssue).toHaveBeenCalledWith(issue);
     expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+  });
+
+  it("压缩阶段显示中文状态，取消会 abort 并及时释放纹理租约", async () => {
+    const release = vi.fn();
+    let rejectExport!: (error: Error) => void;
+    let signal!: AbortSignal;
+    const controlledResources: ExportResources = {
+      atlas,
+      textures: new Map([["page.png", {} as ImageBitmap]]),
+      acquire: () => ({ atlas, textures: new Map([["page.png", {} as ImageBitmap]]), release }),
+      release: vi.fn(),
+    };
+    mocks.exportAllRegions.mockImplementationOnce((_input, onProgress, options) => {
+      signal = options.signal;
+      onProgress(atlas.regions.length, atlas.regions.length, "compressing");
+      return new Promise((_resolve, reject) => { rejectExport = reject; });
+    });
+    render(<ExportPanel resources={controlledResources} inferredScale={inferredScale} sourceVersion="4.2" />);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "导出全部 ZIP" }));
+    expect(screen.getByRole("status").textContent).toContain("正在压缩 ZIP");
+    await userEvent.setup().click(screen.getByRole("button", { name: "取消导出" }));
+    expect(signal.aborted).toBe(true);
+    rejectExport(Object.assign(new Error("导出已取消"), { name: "AbortError" }));
+
+    await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("导出已取消。")).toBeTruthy();
+  });
+
+  it("恢复阶段取消后保持导出锁，直到旧任务 finally 释放租约", async () => {
+    const release = vi.fn();
+    let rejectExport!: (error: Error) => void;
+    const controlledResources: ExportResources = {
+      atlas,
+      textures: new Map([["page.png", {} as ImageBitmap]]),
+      acquire: () => ({ atlas, textures: new Map([["page.png", {} as ImageBitmap]]), release }),
+      release: vi.fn(),
+    };
+    mocks.exportAllRegions.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectExport = reject;
+    }));
+    render(<ExportPanel resources={controlledResources} inferredScale={inferredScale} sourceVersion="4.2" />);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "导出全部 ZIP" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "取消导出" }));
+
+    expect(screen.getByRole("button", { name: "正在导出 ZIP" })).toHaveProperty("disabled", true);
+    expect(mocks.exportAllRegions).toHaveBeenCalledTimes(1);
+    rejectExport(Object.assign(new Error("导出已取消"), { name: "AbortError" }));
+    await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "导出全部 ZIP" })).toHaveProperty("disabled", false);
+  });
+
+  it.each([
+    ["sourceVersion", { sourceVersion: "4.3" as const }],
+    ["legacyAlphaMode", { legacyAlphaMode: "premultiplied" as const }],
+    ["inferredScale", { inferredScale: { ...inferredScale, restoreMultiplier: 3 } }],
+  ])("导出中 %s 改变会 abort 旧配置且绝不下载旧结果", async (_name, changed) => {
+    const stableResources = resources(atlas);
+    let resolveExport!: (result: ExportAllResult) => void;
+    let signal!: AbortSignal;
+    mocks.exportAllRegions.mockImplementationOnce((_input, _progress, options) => {
+      signal = options.signal;
+      return new Promise((resolve) => { resolveExport = resolve; });
+    });
+    const baseline = {
+      resources: stableResources,
+      inferredScale,
+      sourceVersion: "3.8" as const,
+      legacyAlphaMode: "straight" as const,
+    };
+    const view = render(<ExportPanel {...baseline} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "导出全部 ZIP" }));
+
+    view.rerender(<ExportPanel {...baseline} {...changed} />);
+    await waitFor(() => expect(signal.aborted).toBe(true));
+    resolveExport({
+      blob: new Blob(["stale zip"]),
+      report: {
+        version: 1,
+        inferredScale,
+        summary: { successful: 1, skipped: 0, failed: 0, total: 1 },
+        regions: [],
+      },
+      issues: [],
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /导出全部 ZIP/ })).toHaveProperty("disabled", false));
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("纹理租约获取同步失败时受控上报并恢复可重试状态", async () => {
+    const onIssue = vi.fn();
+    const brokenResources: ExportResources = {
+      atlas,
+      textures: new Map([["page.png", {} as ImageBitmap]]),
+      acquire: () => { throw new Error("lease unavailable"); },
+      release: vi.fn(),
+    };
+    render(<ExportPanel
+      resources={brokenResources}
+      inferredScale={inferredScale}
+      sourceVersion="4.2"
+      onIssue={onIssue}
+    />);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "导出全部 ZIP" }));
+
+    expect(await screen.findByText("导出失败：lease unavailable")).toBeTruthy();
+    expect(onIssue).toHaveBeenCalledWith(expect.objectContaining({
+      code: "ZIP_FAILED",
+      details: ["lease unavailable"],
+    }));
+    expect(screen.getByRole("button", { name: "导出全部 ZIP" })).toHaveProperty("disabled", false);
+    expect(mocks.exportAllRegions).not.toHaveBeenCalled();
   });
 });

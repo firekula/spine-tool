@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { classifyImport, extractAtlasPageNames } from "@/lib/files/import-files";
 
 function file(name: string, contents: string, type = "text/plain"): File {
@@ -7,6 +7,11 @@ function file(name: string, contents: string, type = "text/plain"): File {
 
 function png(name: string): File {
   return file(name, "png", "image/png");
+}
+
+function withDeclaredSize(source: File, size: number): File {
+  Object.defineProperty(source, "size", { configurable: true, value: size });
+  return source;
 }
 
 describe("classifyImport", () => {
@@ -144,5 +149,61 @@ describe("classifyImport", () => {
       .rejects.toMatchObject({ code: "MISSING_SKELETON" });
     await expect(classifyImport([file("hero.json", "{}"), png("page.png")]))
       .rejects.toMatchObject({ code: "MISSING_ATLAS" });
+  });
+
+  it.each([
+    ["Atlas", "hero.atlas", 8 * 1024 * 1024 + 1],
+    ["骨骼", "hero.json", 128 * 1024 * 1024 + 1],
+    ["PNG", "page.png", 128 * 1024 * 1024 + 1],
+  ])("在读取任何全文前拒绝超过字节预算的%s文件", async (_label, oversizedName, declaredSize) => {
+    const atlasFile = file("hero.atlas", "page.png\nsize: 1,1");
+    const skeletonFile = file("hero.json", "{}");
+    const textureFile = png("page.png");
+    const oversized = oversizedName.endsWith(".atlas")
+      ? atlasFile
+      : oversizedName.endsWith(".png")
+        ? textureFile
+        : skeletonFile;
+    withDeclaredSize(oversized, declaredSize);
+    const atlasText = vi.spyOn(atlasFile, "text");
+
+    await expect(classifyImport([atlasFile, skeletonFile, textureFile])).rejects.toMatchObject({
+      code: "INPUT_FILE_SIZE_EXCEEDED",
+    });
+    expect(atlasText).not.toHaveBeenCalled();
+  });
+
+  it("在读取 Atlas 前拒绝选择超过 64 张 PNG，即使其中只有一张被引用", async () => {
+    const atlasFile = file("hero.atlas", "page-0.png\nsize: 1,1");
+    const atlasText = vi.spyOn(atlasFile, "text");
+
+    await expect(classifyImport([
+      atlasFile,
+      file("hero.json", "{}"),
+      ...Array.from({ length: 65 }, (_, index) => png(`page-${index}.png`)),
+    ])).rejects.toMatchObject({ code: "TEXTURE_MEMORY_BUDGET_EXCEEDED" });
+    expect(atlasText).not.toHaveBeenCalled();
+  });
+
+  it("在第 65 个 page-only Atlas 页面立即停止，不进入纹理全扫匹配", async () => {
+    const atlasText = Array.from({ length: 65 }, (_, index) => (
+      `page-${index}.png\nfilter: Linear,Linear`
+    )).join("\n\n");
+
+    expect(() => extractAtlasPageNames(atlasText)).toThrow(expect.objectContaining({
+      code: "TEXTURE_MEMORY_BUDGET_EXCEEDED",
+    }));
+  });
+
+  it("在读取 Atlas 前拒绝 PNG 文件声明大小累计超过 256 MiB", async () => {
+    const atlasFile = file("hero.atlas", "page-a.png\nsize: 1,1\n\npage-b.png\nsize: 1,1");
+    const atlasText = vi.spyOn(atlasFile, "text");
+    const first = withDeclaredSize(png("page-a.png"), 128 * 1024 * 1024);
+    const second = withDeclaredSize(png("page-b.png"), 128 * 1024 * 1024);
+    const third = withDeclaredSize(png("unused.png"), 1);
+
+    await expect(classifyImport([atlasFile, file("hero.json", "{}"), first, second, third]))
+      .rejects.toMatchObject({ code: "INPUT_FILE_SIZE_EXCEEDED" });
+    expect(atlasText).not.toHaveBeenCalled();
   });
 });

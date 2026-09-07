@@ -39,6 +39,27 @@ function atlasText(regionCount: number): string {
   ].join("\n");
 }
 
+function pngHeader(width = 1, height = 1): Uint8Array {
+  const header = new Uint8Array(24);
+  header.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  new DataView(header.buffer).setUint32(8, 13);
+  header.set([73, 72, 68, 82], 12);
+  new DataView(header.buffer).setUint32(16, width);
+  new DataView(header.buffer).setUint32(20, height);
+  return header;
+}
+
+function pngFile(name: string): File {
+  const bytes = pngHeader();
+  const file = new File([bytes], name, { type: "image/png" });
+  Object.defineProperty(file, "slice", {
+    value: (start = 0, end = bytes.byteLength) => ({
+      arrayBuffer: async () => bytes.slice(start, end).buffer,
+    }),
+  });
+  return file;
+}
+
 function bundle(name: string, regionCount: number): ImportBundle {
   const atlas = atlasText(regionCount);
   return {
@@ -46,7 +67,7 @@ function bundle(name: string, regionCount: number): ImportBundle {
     atlasText: atlas,
     skeletonFile: new File([JSON.stringify({ skeleton: { spine: "4.3.0" } })], `${name}.json`),
     skeletonKind: "json",
-    textureFiles: new Map([["page.png", new File(["png"], "page.png", { type: "image/png" })]]),
+    textureFiles: new Map([["page.png", pngFile("page.png")]]),
     unusedTextures: [],
   };
 }
@@ -57,7 +78,7 @@ async function preparedWithRealLease(
 ): Promise<PreparedImport> {
   const actual = await vi.importActual<typeof import("@/lib/files/import-workflow")>("@/lib/files/import-workflow");
   return actual.prepareImport(source, {
-    detectVersion: async () => ({ raw: "3.4.0", majorMinor: null, source: "json-field", supported: false, compatibility: null }),
+    detectVersion: async () => ({ raw: "4.3.0", majorMinor: "4.3", source: "json-field", supported: true, compatibility: "stable" }),
     decodeTexture: async () => bitmap,
   });
 }
@@ -74,6 +95,7 @@ describe("workspace export/import race", () => {
       createObjectURL: vi.fn(() => "blob:stale-zip"),
       revokeObjectURL: vi.fn(),
     });
+    mocks.createRuntimeSession.mockRejectedValue(new Error("synthetic preview unavailable"));
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
   });
 
@@ -169,7 +191,7 @@ describe("workspace export/import race", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: /导出全部 ZIP/ }));
 
     const center = await screen.findByRole("region", { name: "问题中心" });
-    expect(center.textContent).toContain("Region 超出纹理范围");
+    await waitFor(() => expect(center.textContent).toContain("Region 超出纹理范围"));
     expect(center.textContent).toContain("对象Region「region-0」");
     expect(center.textContent).toContain("裁切矩形落在所属 PNG 纹理页之外");
     expect(center.textContent).toContain("请检查 Atlas 与 PNG 是否来自同一次导出");

@@ -77,4 +77,18 @@ describe("planRegionRestore", () => {
     expect(() => planRegionRestore(region({ rotation: 45 }), 1)).toThrow("Region「hero」使用不支持的 45° 旋转");
     expect(() => planRegionRestore(region(), 0)).toThrow("Region「hero」的恢复倍率必须是大于 0 的有限数值");
   });
+
+  it.each([
+    [{ originalWidth: 20_000, originalHeight: 1 }, "边长", 1],
+    [{ originalWidth: 8_192, originalHeight: 8_192 }, "像素", 1],
+    [{ originalWidth: 100, originalHeight: 100 }, "输出边长", 200],
+  ] as const)("在创建 Canvas 前拒绝超过安全%s预算的 Region", (overrides, _kind, multiplier) => {
+    expect(() => planRegionRestore(region({
+      packedWidth: 1,
+      packedHeight: 1,
+      offsetLeft: 0,
+      offsetBottom: 0,
+      ...overrides,
+    }), multiplier)).toThrow(/浏览器安全预算/);
+  });
 });

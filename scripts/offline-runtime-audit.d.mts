@@ -10,6 +10,12 @@ export interface TrustedOfflineRuntimeHelperDescriptor {
   readonly sha256: string;
 }
 
+export interface TrustedOfflineAssetDescriptor {
+  readonly path: string;
+  readonly sha256: string;
+}
+
+export const trustedOfflineAssetDescriptors: readonly TrustedOfflineAssetDescriptor[];
 export const trustedOfflineRuntimeDescriptors: readonly TrustedOfflineRuntimeDescriptor[];
 export const trustedOfflineRuntimeHelperDescriptors: readonly TrustedOfflineRuntimeHelperDescriptor[];
 export function matchesTrustedOfflineRuntime(path: string, contents: string | Uint8Array): boolean;

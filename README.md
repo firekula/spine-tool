@@ -11,14 +11,14 @@
 
 | Spine Editor 版本线 | JSON | SKEL | 说明 |
 | --- | --- | --- | --- |
-| 3.5、3.6、3.7 | 支持 | 不支持 | 对应官方 Web Runtime 没有二进制读取器；导入 SKEL 会显示中文能力错误，不会交给其他版本 Runtime |
+| 3.5、3.6、3.7 | 支持 | 不支持 | 对应官方 Web Runtime 没有二进制读取器；SKEL 在 Alpha 确认和任何 Runtime、对象 URL、WebGL 创建前即显示中文能力错误，不会交给其他版本 Runtime |
 | 3.8 | 支持 | 支持 | `3.8.75` 为尽力兼容，会显示官方已知导出问题警告 |
 | 4.0、4.1、4.2 | 支持 | 支持 | 使用各自隔离的同版本 Runtime |
 | 4.3 | 支持 | 支持 | Beta/预发布数据会显示兼容性警告后尝试加载 |
 
-同一 `major.minor` 下的稳定补丁号会路由到该版本线的 Runtime，例如 `3.8.99` 使用 3.8 Runtime。不会静默使用另一个 `major.minor` Runtime，也不会改写或转换骨骼文件。Beta 等预发布版本只提供带警告的尝试加载，不承诺与稳定 Runtime 完全兼容。
+同一 `major.minor` 下的稳定补丁号会路由到该版本线的 Runtime，例如 `3.8.99` 使用 3.8 Runtime。版本字符串必须完整符合 `major.minor` 或 `major.minor.patch`，可带由非空标识符组成的预发布后缀；`4.3.bad`、`4.3.`、`4.3.9foo`、`4.3.0-beta..2` 等畸形值会被视为未知/不支持。工具不会静默使用另一个 `major.minor` Runtime，也不会改写或转换骨骼文件。Beta 等预发布版本只提供带警告的尝试加载，不承诺与稳定 Runtime 完全兼容。
 
-需要使用新版 Chrome、Edge 或 Firefox，并开启硬件加速/WebGL。缺少 WebGL 或 Runtime 无法加载骨骼时，Atlas 的 Region 导出仍可继续使用。
+需要使用新版 Chrome、Edge 或 Firefox，并开启硬件加速/WebGL。Runtime 无法加载骨骼时仍可使用 Atlas-only 导出，但 Straight/PMA 都通过 WebGL 读取原始 RGBA 通道；缺少 WebGL 时无损 Region 导出会受控失败并提示启用 WebGL。
 
 ## 导入与操作
 
@@ -28,17 +28,19 @@
 - 恰好一个 `.json` 或 `.skel`
 - Atlas 声明的全部 PNG 纹理页
 
-工具会自动匹配单页或多页纹理、检测 Spine 版本并加载相应 Runtime。版本无法确定时可手动选择 Runtime；自动预览失败后也可重新手动选择并重试，原文件不会被修改。可在“动画”选择和搜索动画；在“皮肤”切换单一皮肤或组合皮肤；在“插槽”显示、隐藏或批量恢复插槽。预览区支持鼠标滚轮缩放、拖动平移，以及方向键、`+`、`-`、`Home` 和 `0` 键盘操作。
+工具会自动匹配单页或多页纹理、在浏览器解码前校验每张文件的 PNG 签名与 IHDR、检测 Spine 版本并加载相应 Runtime。版本无法确定时可手动选择 Runtime；自动预览失败后也可重新手动选择并重试，原文件不会被修改。重置、替换导入或离开页面会取消尚未完成的纹理解码，并立即释放已经解码的页面。可在“动画”选择和搜索动画；在“皮肤”切换单一皮肤或组合皮肤；在“插槽”显示、隐藏或批量恢复插槽。预览区支持鼠标滚轮缩放、拖动平移，以及方向键、`+`、`-`、`Home` 和 `0` 键盘操作。
 
-Spine 3.x 的旧 Atlas 可能没有可靠的 `pma` 信息。工具会要求明确确认 `PMA` 或 `Straight Alpha` 后再预览；文件名只能预选建议值。选错会造成半透明边缘发黑、发白或混合异常，但不会改变 Atlas 子图的裁切坐标。
+Spine 3.x 的旧 Atlas 可能没有可靠的 `pma` 信息。工具会要求明确确认 `PMA` 或 `Straight Alpha` 后再预览和导出；文件名只能预选建议值。4.x 按每个 Atlas 页大小写不敏感的 `pma: true|false` 分别处理，因此同一多页 Atlas 可以混合 PMA 与 Straight 页面。所有导出的 PNG 都是 Straight Alpha：PMA 页会在缩放和编码前反预乘，Alpha 为 0 的像素会把 RGB 归零。选错 3.x 模式会造成半透明边缘异常，但不会改变 Atlas 子图的裁切坐标。
 
-若版本检测、Runtime 解析或 WebGL 渲染失败，只要 Atlas 和 PNG 有效，仍可使用 Atlas-only 模式导出 Region ZIP。
+若版本检测、早期 SKEL 能力检查或 Runtime 解析失败，只要 Atlas 和 PNG 有效，仍会保留 Atlas-only 资源并可导出 Region ZIP；无损 Region 导出仍要求 WebGL。
 
 ## 倍率与导出报告
 
-工具会还原 Atlas 的旋转、裁剪、偏移和 `orig` 逻辑尺寸，并从页级 `scale` 或 Region 附件尺寸推算导出倍率。若 Spine 以 50% 导出且 Atlas 记录 `scale: 0.5`，工具会按 2 倍恢复逻辑尺寸。界面会显示高、中、低置信度；低置信度代表证据不足或存在异常尺寸，请在导出前核对，必要时修改全局倍率或单个 Region 倍率。
+工具会还原 Atlas 的旋转、裁剪、偏移和 `orig` 逻辑尺寸，并从页级 `scale` 或 Region 附件尺寸推算导出倍率。Atlas 的 `rotate: true` 表示打包时把源图逆时针旋转 90°，数字 `90`/`270` 同样表示打包角度；恢复时应用其逆变换。页级 `size` 可以省略或写为官方未知尺寸形式 `0,0`，工具会使用解码后的 PNG 实际尺寸，并在导出前据此拒绝越界 Region。若 Spine 以 50% 导出且 Atlas 记录 `scale: 0.5`，工具会按 2 倍恢复逻辑尺寸。界面会显示高、中、低置信度；低置信度代表证据不足或存在异常尺寸，请在导出前核对，必要时修改全局倍率或单个 Region 倍率。
 
-“导出全部 ZIP”生成的 ZIP 包含成功恢复的 PNG 和 `export-report.json`。报告记录每个 Region 的输出路径、尺寸、使用倍率、跳过或失败原因，方便复查。
+“导出全部 ZIP”生成的 ZIP 包含成功恢复的 PNG 和 `export-report.json`。报告记录每个 Region 的输出路径、尺寸、使用倍率、跳过或失败原因，以及 `alpha.source`、`alpha.inputMode`、`alpha.conversion`，方便复查。恢复阶段显示 Region 进度，压缩阶段显示“正在压缩 ZIP…”；点击“取消导出”会终止专用压缩 Worker 并释放本次纹理租约。固定文件顺序、时间戳和 DEFLATE 参数保证相同输入产生确定性 ZIP。
+
+为避免异常素材耗尽浏览器内存，一次最多选择一个 Atlas、一个骨骼文件和 64 张纹理；Atlas 文件最多 8 MiB、JSON/SKEL 最多 128 MiB、单张 PNG 最多 128 MiB、PNG 文件累计最多 256 MiB，每份 Atlas 最多 4,096 个 Region。单页最多 16,777,216 像素，全部页面累计最多 33,554,432 像素。批次输出的 RGBA 估算上限为 256 MiB，所有实际使用页面的原始 RGBA 累计预检上限为 128 MiB，压缩前保留的 PNG 与报告 entry 累计上限为 256 MiB；实际恢复只缓存当前一个纹理页的原始通道，并在进入 ZIP 压缩前清空。Region 数上限也让 ZIP 条目远低于当前非 ZIP64 编码器的 65,535 条边界。超限会在全文读取、大块恢复或压缩开始前以中文错误终止，建议拆分素材或降低页面尺寸。
 
 Atlas 只能提供被打包后的像素、裁切、旋转和逻辑尺寸信息。放大可以恢复原始尺寸的画布和摆放关系，但缩小导出时已经丢失的真实像素细节无法重新生成；原图中被压缩、裁掉或本来不存在的细节也无法可靠逆向恢复。导出结果应视为基于 Atlas 元数据的重建，而不是原始美术源文件的替代品。
 
@@ -65,10 +67,18 @@ npm run verify-runtime-assets
 npm run package:offline
 ```
 
-`npm run package:offline` 会重新生成离线静态构建，校验八个 Runtime chunk、许可文件和远程运行依赖，然后创建根目录的 `spine-preview-export-offline.zip`。
+`npm run package:offline` 会重新生成离线静态构建，先按 `scripts/offline-assets.json` 校验最终构建的完整路径集合和每个文件的完整 SHA-256，再校验八个 Runtime、共享 helper、ZIP Worker、三份许可和两个 launcher，最后以原子 no-replace 方式创建根目录的 `spine-preview-export-offline.zip`。旧目标会先在已校验的同文件系统路径中隔离，失败不会留下可误发的旧目标；提交窗口若出现同名文件则 fail-closed 而不会覆盖。缺失、额外、改名、重复、大小写/Windows 路径碰撞或任一单字节变化都会 fail-closed；打包过程不会自动学习新 hash。
 
-远程依赖审计先按浏览器 HTML 解析规则读取 URL 属性、内联样式和可执行脚本，再用 JavaScript AST 追踪 Worker URL 的 path/base、全局网络 API 的间接调用与别名。普通应用 chunk 中任何可静态求值的外部 URL 都会被拒绝；网络目标必须能直接证明为相对路径、`blob:` 或 `data:`。官方 Spine Runtime 自带的通用资源加载器以及 Vite 的 modulepreload helper 需要接收运行时本地 URL，因此只有路径、调用形状和完整 SHA-256 都与已复核构建一致时才允许这些动态参数；任一字节变化都会撤销例外并阻止打包。离线入口以 `connect-src 'none'`、`form-action 'none'`、`object-src 'none'` 和仅限本地/`blob:` 的 `worker-src` CSP 配合 E2E 外部请求拦截提供运行时防线。
+完整 hash 门禁通过后，远程依赖审计按浏览器 HTML 规则检查 URL 属性、meta refresh、内联样式和可执行脚本，再用 JavaScript AST 追踪 Worker URL、全局网络 API 的直接/间接调用、`window.open`、`location.assign/replace`、location 赋值以及可计算或动态目标。普通应用 chunk 的目标必须能直接证明为相对路径、`blob:` 或 `data:`。官方 Spine Runtime 通用资源加载器、Vite modulepreload 与本地 ZIP Worker 只有路径、调用形状和完整 SHA-256 都与已复核构建一致时才获得最小例外。离线入口以 `connect-src 'none'`、`form-action 'none'`、`object-src 'none'` 和仅限本地/`blob:` 的 `worker-src` CSP 配合浏览器零外部请求、导航和 popup 测试提供运行时防线。完整设计见 [离线包安全与完整性](docs/security-offline.md)。
 
 ## Spine Runtime 许可
 
-Spine Runtime 受 Esoteric Software 的许可条款约束。使用、分发本工具或离线包前，请阅读包内 `licenses/SPINE-RUNTIMES-LICENSE.txt`，并确认你的 Spine Runtime 使用方式符合适用许可。
+Spine Runtime 受 Esoteric Software 的许可条款约束。在线 `dist`、离线 ZIP 和源码 ZIP 均包含以下三份固定官方原文；使用或分发前请阅读适用于对应版本的文件，并确认你的使用方式符合条款。
+
+| Runtime 版本 | 源码 ZIP / 仓库路径 | 在线与离线发布路径 |
+| --- | --- | --- |
+| 3.5–3.6 | `public/licenses/SPINE-RUNTIMES-LICENSE-v2.5.txt` | `licenses/SPINE-RUNTIMES-LICENSE-v2.5.txt` |
+| 3.7–4.1 | `public/licenses/SPINE-RUNTIMES-LICENSE-2019.txt` | `licenses/SPINE-RUNTIMES-LICENSE-2019.txt` |
+| 4.2–4.3 | `public/licenses/SPINE-RUNTIMES-LICENSE-2025.txt` | `licenses/SPINE-RUNTIMES-LICENSE-2025.txt` |
+
+`node_modules`、npm cache 和构建依赖树只用于本地构建/来源验证，不会被放入网站、离线 ZIP 或源码 ZIP。
