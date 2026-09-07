@@ -35,7 +35,7 @@ const requiredLicenseDescriptors = Object.freeze([
   }),
 ]);
 const trustedLauncherDescriptors = Object.freeze([
-  Object.freeze({ path: "Start-Offline.ps1", sha256: "8aca0fc2e72038af9ee1fd9c7e16c696e2b6c4790735cc1c5d87d3ebc6c55c33" }),
+  Object.freeze({ path: "Start-Offline.ps1", sha256: "5687647adc007d34e7b6d94b715b1d16d2ad7336349a5cf0e4687ce1bfe24e6b" }),
   Object.freeze({ path: "启动离线工具.cmd", sha256: "a3410032a6b2cf6593a294a085e23625430946becc6a0abbd2db66647baac180" }),
 ]);
 const execFileAsync = promisify(execFile);

@@ -27,7 +27,7 @@ launcher 只允许下列两个精确文件，不允许额外 `.cmd`、`.bat` 或
 
 | 路径 | SHA-256 |
 | --- | --- |
-| `Start-Offline.ps1` | `8aca0fc2e72038af9ee1fd9c7e16c696e2b6c4790735cc1c5d87d3ebc6c55c33` |
+| `Start-Offline.ps1` | `5687647adc007d34e7b6d94b715b1d16d2ad7336349a5cf0e4687ce1bfe24e6b` |
 | `启动离线工具.cmd` | `a3410032a6b2cf6593a294a085e23625430946becc6a0abbd2db66647baac180` |
 
 ## Runtime 许可
