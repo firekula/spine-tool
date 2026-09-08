@@ -22,64 +22,64 @@ const maxCanonicalizationPasses = 8;
 export const trustedOfflineRuntimeDescriptors = Object.freeze([
   Object.freeze({
     version: "3_5",
-    path: "assets/runtime-3_5-CT34t7z1.js",
-    sha256: "fbce920c46b983b58f8d4f5acaf251ab57eefde1dfd6d23e01c79450067add31",
+    path: "assets/runtime-3_5-CF7THh20.js",
+    sha256: "f04096b69db90dbd263fcefa61ba9f52e6f5d6726c880e36da961b0e03b59e16",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/afdbbc2044fb56c762d4e2eb54b63b1bb9276a48/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "3_6",
-    path: "assets/runtime-3_6-BMXfRshV.js",
-    sha256: "c512f5ecaf6e13430951fea93e6118d2a8b5316195bbfaf7a1553f30436786d0",
+    path: "assets/runtime-3_6-D9p7RgVT.js",
+    sha256: "8c9e902eb697282de66e81171fdd2dc8e0c9761429ff5d9c2cc8f99e1e592328",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/654c20e5b0e523040b6366bbd1042510d2645134/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "3_7",
-    path: "assets/runtime-3_7-CS9q-h-B.js",
-    sha256: "56fae6e99ee8deb83917d3ec6fa4cbebc02bc85af7c34e2899a4d61ea06163a4",
+    path: "assets/runtime-3_7-DYRq2djF.js",
+    sha256: "d991785f8be2ec87d6ed22ff43bb344f15814d4500f8ba791942f298b8a45d45",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/9639bcc81722d7178fd9d1cdc1a3d55a4c91f989/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "3_8",
-    path: "assets/runtime-3_8-BhD5Dcpu.js",
-    sha256: "ed13541b4a78338a1ce52f72e3d32d2ec561dc9ee225c5b141ec52f9c3731178",
+    path: "assets/runtime-3_8-B9Vc_0ir.js",
+    sha256: "1f2881b7f1037d1eb79ea4a6e12c2ef552aebd62637d9443b697b0fb7dbcab34",
     allowedStaticExternalUrls: Object.freeze([
       "https://github.com/EsotericSoftware/spine-runtimes/tree/8b4844bd4b193ba9e54487ed397a777993cbad56/spine-ts",
     ]),
   }),
   Object.freeze({
     version: "4_0",
-    path: "assets/runtime-4_0-CrZp25bN.js",
-    sha256: "037dc87d894f291dbffbc67ae9d4c00bc995f22dfb0d089b6a697edba54bd9d2",
+    path: "assets/runtime-4_0-BR-V870y.js",
+    sha256: "7e51a93c1ecee62fb57e84dac255398c25de3ff7049504eee5d4edc18fe36751",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.0.31.tgz",
     ]),
   }),
   Object.freeze({
     version: "4_1",
-    path: "assets/runtime-4_1-B2WeTxzT.js",
-    sha256: "f1e3ce106ad53e331f894e1e08e47924569a0c003ef6f2a5a73bbabcf84ee1cd",
+    path: "assets/runtime-4_1-CphynOwC.js",
+    sha256: "04b4c4c7405e5d50ec99a2ca8265f8e54810178b288e709fb3496c800bc0ae5a",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.1.56.tgz",
     ]),
   }),
   Object.freeze({
     version: "4_2",
-    path: "assets/runtime-4_2-C2PG8nvF.js",
-    sha256: "03030023a5bce1b1f59e73f8d637507ce0253e5a0b3c6bbb07f42659d039b9d8",
+    path: "assets/runtime-4_2-CqAES-ir.js",
+    sha256: "1e611e343a136b6003aa2f80e58970e6197e451d8524c77cca843c2ff2c07d72",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.2.120.tgz",
     ]),
   }),
   Object.freeze({
     version: "4_3",
-    path: "assets/runtime-4_3-C5zZf3VS.js",
-    sha256: "befaac1d5c3707e0b87e4629838b75776f6dfaa3058648a51d24596f37026e88",
+    path: "assets/runtime-4_3-C8pusc3x.js",
+    sha256: "b70517bb3a7ff07ae88c446f00127b9bc923b91ef37f9a82b6f5435ddfbd0d4d",
     allowedStaticExternalUrls: Object.freeze([
       "https://registry.npmjs.org/@esotericsoftware/spine-webgl/-/spine-webgl-4.3.9.tgz",
     ]),
@@ -88,8 +88,8 @@ export const trustedOfflineRuntimeDescriptors = Object.freeze([
 
 export const trustedOfflineRuntimeHelperDescriptors = Object.freeze([
   Object.freeze({
-    path: "assets/runtime-factory-Cqg1WYks.js",
-    sha256: "50e96da8b5c5368e447a980b22d5bafb6a4067a3daf80c6ad77cfd8cbffc0316",
+    path: "assets/runtime-factory-GPLej-A5.js",
+    sha256: "d71f386aa734ba67abdab85240c7b12b6e5ab46b000e715f2adf60cb06bd2fe7",
   }),
 ]);
 

@@ -74,6 +74,18 @@ interface TextureDimensions {
   height: number;
 }
 
+function abortError(): Error {
+  const error = new Error("导入已取消");
+  error.name = "AbortError";
+  return error;
+}
+
+// AbortSignal.prototype.throwIfAborted is unavailable in older Chromium engines,
+// so callers rely on this helper instead of the native method.
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError();
+}
+
 function textureBudgetError(subject: string, message: string): ImportWorkflowError {
   return new ImportWorkflowError("TEXTURE_MEMORY_BUDGET_EXCEEDED", subject, [message]);
 }
@@ -218,7 +230,7 @@ export async function prepareImport(
   dependencies: PrepareImportDependencies = {},
 ): Promise<PreparedImport> {
   const { signal } = dependencies;
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   assertImportFileByteBudget(bundle.atlasFile, bundle.skeletonFile, bundle.textureFiles.values());
   const parse = dependencies.parseAtlas ?? parseAtlas;
   const detect = dependencies.detectVersion ?? detectSpineVersion;
@@ -228,7 +240,7 @@ export async function prepareImport(
   }));
   const atlas = parse(bundle.atlasText);
   const detected = await detect(bundle.skeletonFile);
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   const textures = new Map<string, ImageBitmap>();
 
   if (bundle.textureFiles.size > MAX_TEXTURE_PAGE_COUNT) {
@@ -240,9 +252,9 @@ export async function prepareImport(
   const headerDimensions = new Map<string, TextureDimensions>();
   let headerPixels = 0n;
   for (const [name, file] of bundle.textureFiles) {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     const dimensions = await readPngHeaderDimensions(file);
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     if (!dimensions) {
       throw new ImportWorkflowError(
         "IMAGE_DECODE_FAILED",
@@ -258,10 +270,10 @@ export async function prepareImport(
     let decodedPixels = 0n;
     for (const [name, file] of bundle.textureFiles) {
       try {
-        signal?.throwIfAborted();
+        throwIfAborted(signal);
         const texture = await decode(file);
         textures.set(name, texture);
-        signal?.throwIfAborted();
+        throwIfAborted(signal);
         decodedPixels = reserveTexturePixels(name, texture, decodedPixels);
         const header = headerDimensions.get(name);
         if (header && (header.width !== texture.width || header.height !== texture.height)) {
@@ -271,7 +283,7 @@ export async function prepareImport(
           );
         }
       } catch (error) {
-        signal?.throwIfAborted();
+        throwIfAborted(signal);
         if (error instanceof ImportWorkflowError) throw error;
         throw new ImportWorkflowError(
           "IMAGE_DECODE_FAILED",
@@ -281,7 +293,7 @@ export async function prepareImport(
       }
     }
     resolveDecodedPageDimensions(atlas, textures);
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
   } catch (error) {
     for (const texture of textures.values()) texture.close();
     throw error;

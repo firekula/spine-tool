@@ -18,7 +18,7 @@
 
 同一 `major.minor` 下的稳定补丁号会路由到该版本线的 Runtime，例如 `3.8.99` 使用 3.8 Runtime。版本字符串必须完整符合 `major.minor` 或 `major.minor.patch`，可带由非空标识符组成的预发布后缀；`4.3.bad`、`4.3.`、`4.3.9foo`、`4.3.0-beta..2` 等畸形值会被视为未知/不支持。工具不会静默使用另一个 `major.minor` Runtime，也不会改写或转换骨骼文件。Beta 等预发布版本只提供带警告的尝试加载，不承诺与稳定 Runtime 完全兼容。
 
-需要使用新版 Chrome、Edge 或 Firefox，并开启硬件加速/WebGL。Runtime 无法加载骨骼时仍可使用 Atlas-only 导出，但 Straight/PMA 都通过 WebGL 读取原始 RGBA 通道；缺少 WebGL 时无损 Region 导出会受控失败并提示启用 WebGL。
+需要使用支持 ES module 的 Chrome、Edge 或 Firefox，并开启硬件加速/WebGL。导入流程只依赖 `AbortSignal.aborted`，不再调用较新的 `AbortSignal.prototype.throwIfAborted`，因此在较旧的 Chromium 内核（约 Chromium 87 及以上）中也能完成导入与 Atlas 导出；无损 Region 恢复仍需要 WebGL。Runtime 无法加载骨骼时仍可使用 Atlas-only 导出，但 Straight/PMA 都通过 WebGL 读取原始 RGBA 通道；缺少 WebGL 时无损 Region 导出会受控失败并提示启用 WebGL。
 
 ## 导入与操作
 
@@ -82,3 +82,7 @@ Spine Runtime 受 Esoteric Software 的许可条款约束。在线 `dist`、离�
 | 4.2–4.3 | `public/licenses/SPINE-RUNTIMES-LICENSE-2025.txt` | `licenses/SPINE-RUNTIMES-LICENSE-2025.txt` |
 
 `node_modules`、npm cache 和构建依赖树只用于本地构建/来源验证，不会被放入网站、离线 ZIP 或源码 ZIP。
+
+## 更新记录
+
+见 [CHANGELOG.md](CHANGELOG.md)。
