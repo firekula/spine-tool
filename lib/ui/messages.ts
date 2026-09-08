@@ -92,6 +92,16 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
     reason: "Runtime 无法解析骨骼 JSON。",
     action: "请检查 JSON 是否完整，并确认所选 Runtime 与导出版本一致。",
   },
+  REGION_REFERENCE_WHITESPACE_MISMATCH: {
+    title: "Region 名称含首尾空格",
+    reason: "JSON 附件 path 与 Atlas Region 名只差首尾空格。Spine Runtime 会裁剪 Atlas Region 名的首尾空格，但不会裁剪 JSON 中的 path，因此两者无法精确匹配。",
+    action: "请删除 JSON 中该附件 path 的首尾空格（或删除 path 字段，让它回退为附件名），或在 Spine 中重命名 Region 后重新导出 Atlas 与 JSON。这与 Runtime 版本无关，切换版本无法解决。",
+  },
+  REGION_REFERENCE_MISSING: {
+    title: "JSON 引用的 Region 不在 Atlas 中",
+    reason: "骨骼 JSON 的 Region 或 Mesh 附件引用了一个当前 Atlas 中不存在的 Region 名。",
+    action: "请确认 Atlas 与 JSON 来自同一次导出；若 Region 已被重命名，请重新导出两个文件。",
+  },
   SPINE_3_8_75_COMPATIBILITY: {
     title: "Spine 3.8.75 尽力兼容",
     reason: "官方 Spine 3.8 Runtime 将这个精确导出版本标记为存在已知问题；工具只移除主动拒绝，并原样尝试读取骨骼数据。",

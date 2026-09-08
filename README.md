@@ -30,6 +30,8 @@
 
 工具会自动匹配单页或多页纹理、在浏览器解码前校验每张文件的 PNG 签名与 IHDR、检测 Spine 版本并加载相应 Runtime。版本无法确定时可手动选择 Runtime；自动预览失败后也可重新手动选择并重试，原文件不会被修改。重置、替换导入或离开页面会取消尚未完成的纹理解码，并立即释放已经解码的页面。可在“动画”选择和搜索动画；在“皮肤”切换单一皮肤或组合皮肤；在“插槽”显示、隐藏或批量恢复插槽。预览区支持鼠标滚轮缩放、拖动平移，以及方向键、`+`、`-`、`Home` 和 `0` 键盘操作。
 
+若 JSON 的 Region 或 Mesh 附件引用的名称与 Atlas 中的 Region 名只差首尾空格，工具会在加载任何 Runtime 之前给出中文诊断，指明具体槽位、附件、JSON 中的 `path` 和 Atlas 中的 Region 名，而不是只显示 Runtime 的英文 `Region not found in atlas` 报错。Spine Runtime 解析 Atlas 时会裁剪 Region 名的首尾空格，但读取 JSON `path` 时不裁剪，因此这类素材在任何 Runtime 版本下都无法加载；该诊断只做提示，不会改写骨骼或 Atlas 数据。引用完全不存在的 Region 时会单独报告缺失。
+
 Spine 3.x 的旧 Atlas 可能没有可靠的 `pma` 信息。工具会要求明确确认 `PMA` 或 `Straight Alpha` 后再预览和导出；文件名只能预选建议值。4.x 按每个 Atlas 页大小写不敏感的 `pma: true|false` 分别处理，因此同一多页 Atlas 可以混合 PMA 与 Straight 页面。所有导出的 PNG 都是 Straight Alpha：PMA 页会在缩放和编码前反预乘，Alpha 为 0 的像素会把 RGB 归零。选错 3.x 模式会造成半透明边缘异常，但不会改变 Atlas 子图的裁切坐标。
 
 若版本检测、早期 SKEL 能力检查或 Runtime 解析失败，只要 Atlas 和 PNG 有效，仍会保留 Atlas-only 资源并可导出 Region ZIP；无损 Region 导出仍要求 WebGL。
@@ -70,6 +72,17 @@ npm run package:offline
 `npm run package:offline` 会重新生成离线静态构建，先按 `scripts/offline-assets.json` 校验最终构建的完整路径集合和每个文件的完整 SHA-256，再校验八个 Runtime、共享 helper、ZIP Worker、三份许可和两个 launcher，最后以原子 no-replace 方式创建根目录的 `spine-preview-export-offline.zip`。旧目标会先在已校验的同文件系统路径中隔离，失败不会留下可误发的旧目标；提交窗口若出现同名文件则 fail-closed 而不会覆盖。缺失、额外、改名、重复、大小写/Windows 路径碰撞或任一单字节变化都会 fail-closed；打包过程不会自动学习新 hash。
 
 完整 hash 门禁通过后，远程依赖审计按浏览器 HTML 规则检查 URL 属性、meta refresh、内联样式和可执行脚本，再用 JavaScript AST 追踪 Worker URL、全局网络 API 的直接/间接调用、`window.open`、`location.assign/replace`、location 赋值以及可计算或动态目标。普通应用 chunk 的目标必须能直接证明为相对路径、`blob:` 或 `data:`。官方 Spine Runtime 通用资源加载器、Vite modulepreload 与本地 ZIP Worker 只有路径、调用形状和完整 SHA-256 都与已复核构建一致时才获得最小例外。离线入口以 `connect-src 'none'`、`form-action 'none'`、`object-src 'none'` 和仅限本地/`blob:` 的 `worker-src` CSP 配合浏览器零外部请求、导航和 popup 测试提供运行时防线。完整设计见 [离线包安全与完整性](docs/security-offline.md)。
+
+## Docker 部署
+
+仓库提供 `Dockerfile`、`docker-compose.yml` 与已构建的 `docker-image/spine-tool-0.1.0.tar.gz`（`linux/amd64`，压缩后约 21 MB）。镜像基于 `nginx:alpine`，只提供静态站点，默认发布到宿主 `8080` 端口。
+
+```bash
+docker load -i docker-image/spine-tool-0.1.0.tar.gz
+docker compose up -d          # 打开 http://<服务器地址>:8080
+```
+
+应用完全在浏览器本地运行，容器无需数据卷、环境变量或数据库。手动构建：`npm run docker:build`；构建并导出可上传的归档：`npm run docker:package`，可追加 `-- --tag spine-tool:0.2.0`、`-- --platform linux/arm64`、`-- --no-cache`。构建、部署、换端口、ARM64 与多架构、反向代理、升级流程和已应用的响应头见 [Docker 部署说明](DOCKER.md)。
 
 ## Spine Runtime 许可
 

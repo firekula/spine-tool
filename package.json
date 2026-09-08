@@ -11,7 +11,9 @@
     "verify-runtime-assets": "node scripts/verify-runtime-assets.mjs",
     "verify-runtime-assets:fast": "node scripts/verify-runtime-assets.mjs --fast",
     "prepackage:offline": "npm run verify-runtime-assets",
-    "package:offline": "node scripts/package-offline.mjs"
+    "package:offline": "node scripts/package-offline.mjs",
+    "docker:build": "node scripts/build-docker-image.mjs",
+    "docker:package": "node scripts/build-docker-image.mjs --save"
   },
   "dependencies": {
     "@esotericsoftware/spine-webgl-4.0": "npm:@esotericsoftware/spine-webgl@4.0.31",

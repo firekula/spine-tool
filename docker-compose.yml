@@ -1,0 +1,24 @@
+# Docker Compose deployment for the Spine preview / Atlas export tool.
+#
+#   docker compose up -d            # start (uses the loaded image if present)
+#   docker compose up -d --build    # rebuild from source, then start
+#   docker compose logs -f
+#   docker compose down
+#
+# Change the published port with an environment variable, e.g.
+#   SPINE_TOOL_PORT=9000 docker compose up -d
+# or create a .env file next to this file containing: SPINE_TOOL_PORT=9000
+services:
+  spine-tool:
+    image: spine-tool:0.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spine-tool
+    restart: unless-stopped
+    ports:
+      - "${SPINE_TOOL_PORT:-8080}:80"
+    # The app is 100% client-side: no volumes, no env vars, no database, and
+    # imported files never leave the browser. The only exposed surface is HTTP.
+    security_opt:
+      - no-new-privileges:true

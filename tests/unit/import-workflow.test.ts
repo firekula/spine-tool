@@ -54,6 +54,29 @@ function bridge(): SpineRuntimeBridge {
   };
 }
 
+function regionBundle(atlasRegionName: string, attachment: Record<string, unknown>): ImportBundle {
+  const atlasText = [
+    "page.png",
+    "size: 1,1",
+    "",
+    atlasRegionName,
+    "bounds: 0,0,1,1",
+    "offsets: 0,0,1,1",
+  ].join("\n");
+  const skeleton = {
+    skeleton: { spine: "3.8.99" },
+    skins: [{ name: "default", attachments: { yanjing: { yanjing: attachment } } }],
+  };
+  return {
+    atlasFile: new File([atlasText], "厨师.atlas"),
+    atlasText,
+    skeletonFile: new File([JSON.stringify(skeleton)], "厨师.json"),
+    skeletonKind: "json",
+    textureFiles: new Map([["page.png", new File([pngHeader()], "page.png", { type: "image/png" })]]),
+    unusedTextures: [],
+  };
+}
+
 describe("import workflow resources", () => {
   it.each(["3.5", "3.6", "3.7"] as const)("Spine %s SKEL 在加载模块、bridge 和 object URL 前静态拒绝", async (version) => {
     const source = bundle();
@@ -352,5 +375,53 @@ describe("import workflow resources", () => {
 
     expect(revoke).toHaveBeenCalledWith("blob:first");
     expect(runtimeBridge.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("JSON path 与 Atlas Region 只差首尾空格时，在加载 Runtime 前给出精确诊断", async () => {
+    const loadModule = vi.fn();
+    const createObjectUrl = vi.fn();
+
+    const error = await createRuntimeSession(regionBundle("yanjing", { path: "yanjing " }), "3.8", {
+      alphaMode: "straight",
+      loadModule,
+      createObjectUrl,
+    }).catch((reason: unknown) => reason);
+
+    expect(error).toMatchObject({
+      code: "REGION_REFERENCE_WHITESPACE_MISMATCH",
+      subject: "Region「yanjing」",
+    });
+    const details = (error as { details?: string[] }).details ?? [];
+    expect(details.join("\n")).toContain("「yanjing 」");
+    expect(details.join("\n")).toContain("首尾空格");
+    expect(loadModule).not.toHaveBeenCalled();
+    expect(createObjectUrl).not.toHaveBeenCalled();
+  });
+
+  it("JSON 引用的 Region 完全不存在时报告缺失而不是空格差异", async () => {
+    await expect(createRuntimeSession(regionBundle("yanjing", { path: "missing" }), "3.8", {
+      alphaMode: "straight",
+      loadModule: vi.fn(),
+    })).rejects.toMatchObject({
+      code: "REGION_REFERENCE_MISSING",
+      subject: "Region「missing」",
+    });
+  });
+
+  it("无法解析的 JSON 仍交给所选 Runtime 报告，而不是误报 Region 问题", async () => {
+    const runtimeBridge = bridge();
+    const source = regionBundle("yanjing", { path: "yanjing" });
+    source.skeletonFile = new File(["not json"], "厨师.json");
+    const loadModule = vi.fn(async () => ({ createBridge: () => runtimeBridge } as SpineRuntimeModule));
+
+    const session = await createRuntimeSession(source, "3.8", {
+      alphaMode: "straight",
+      loadModule,
+      createObjectUrl: () => "blob:page",
+      revokeObjectUrl: vi.fn(),
+    });
+
+    expect(loadModule).toHaveBeenCalledTimes(1);
+    session.release();
   });
 });

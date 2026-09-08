@@ -1,4 +1,5 @@
 import { parseAtlas } from "@/lib/atlas/parse-atlas";
+import { findRegionReferenceProblems, type RegionReferenceProblem } from "@/lib/atlas/region-references";
 import type { AtlasDocument } from "@/lib/atlas/types";
 import type { ImportBundle } from "@/lib/files/import-files";
 import { assertImportFileByteBudget, MAX_TEXTURE_PAGE_COUNT } from "@/lib/files/import-limits";
@@ -149,6 +150,53 @@ export function assertRuntimeCapability(
       ],
     );
   }
+}
+
+function describeAttachment(problem: RegionReferenceProblem): string {
+  return `槽位「${problem.slotName}」的附件「${problem.attachmentName}」`;
+}
+
+function regionReferenceError(problems: readonly RegionReferenceProblem[]): ImportWorkflowError {
+  const first = problems[0]!;
+  const remaining = problems.length > 1
+    ? `本次导入还有 ${problems.length - 1} 处类似的 Region 引用问题。`
+    : "";
+  if (first.kind === "outer-whitespace") {
+    return new ImportWorkflowError(
+      "REGION_REFERENCE_WHITESPACE_MISMATCH",
+      `Region「${first.atlasRegionName}」`,
+      [
+        `${describeAttachment(first)}在 JSON 中引用 Region「${first.referencedName}」，名称包含首尾空格；Atlas 中的 Region 名是「${first.atlasRegionName}」。`,
+        "Spine Runtime 解析 Atlas 时会裁剪 Region 名的首尾空格，但读取 JSON 附件 path 时不会裁剪，因此两者无法精确匹配。",
+        "请删除 JSON 中该附件 path 的首尾空格（或删除 path 字段，让它回退为附件名），或在 Spine 中重命名 Region 后重新导出 Atlas 与 JSON。",
+        `这与所选 Runtime 版本无关，切换版本无法解决。${remaining}`,
+      ],
+    );
+  }
+  return new ImportWorkflowError(
+    "REGION_REFERENCE_MISSING",
+    `Region「${first.referencedName}」`,
+    [
+      `${describeAttachment(first)}引用了 Region「${first.referencedName}」，但当前 Atlas 中没有这个 Region。`,
+      `请确认 Atlas 与 JSON 来自同一次导出；若 Region 已被重命名，请重新导出两个文件。${remaining}`,
+    ],
+  );
+}
+
+/**
+ * Rejects JSON skeletons whose region lookups cannot succeed, so the user sees
+ * the actual cause instead of the runtime's generic "Region not found" error.
+ * Malformed JSON is left to the selected Runtime, which reports it in context.
+ */
+function assertRegionReferences(atlasText: string, skeletonText: string): void {
+  let skeletonJson: unknown;
+  try {
+    skeletonJson = JSON.parse(skeletonText);
+  } catch {
+    return;
+  }
+  const problems = findRegionReferenceProblems(parseAtlas(atlasText), skeletonJson);
+  if (problems.length > 0) throw regionReferenceError(problems);
 }
 
 function resolveDecodedPageDimensions(atlas: AtlasDocument, textures: ReadonlyMap<string, ImageBitmap>): void {
@@ -320,6 +368,10 @@ export async function createRuntimeSession(
     : undefined;
   const createObjectUrl = dependencies.createObjectUrl ?? ((file: File) => URL.createObjectURL(file));
   const revokeObjectUrl = dependencies.revokeObjectUrl ?? ((url: string) => URL.revokeObjectURL(url));
+  const skeleton = bundle.skeletonKind === "json"
+    ? { kind: "json" as const, text: await bundle.skeletonFile.text() }
+    : { kind: "skel" as const, bytes: new Uint8Array(await bundle.skeletonFile.arrayBuffer()) };
+  if (skeleton.kind === "json") assertRegionReferences(bundle.atlasText, skeleton.text);
   const module = await loadModule(version);
   const bridge = module.createBridge();
   const objectUrls = new Map<string, string>();
@@ -333,9 +385,6 @@ export async function createRuntimeSession(
   };
 
   try {
-    const skeleton = bundle.skeletonKind === "json"
-      ? { kind: "json" as const, text: await bundle.skeletonFile.text() }
-      : { kind: "skel" as const, bytes: new Uint8Array(await bundle.skeletonFile.arrayBuffer()) };
     for (const [name, file] of bundle.textureFiles) {
       objectUrls.set(name, createObjectUrl(file));
     }

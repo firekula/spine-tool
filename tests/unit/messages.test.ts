@@ -16,6 +16,8 @@ describe("getIssueMessage", () => {
     "TEXTURE_MEMORY_BUDGET_EXCEEDED",
     "REGION_COUNT_EXCEEDED",
     "REGION_OUT_OF_BOUNDS",
+    "REGION_REFERENCE_WHITESPACE_MISMATCH",
+    "REGION_REFERENCE_MISSING",
     "ZIP_FAILED",
   ])("%s 有中文标题、原因和操作建议", (code) => {
     const message = getIssueMessage({ code, severity: "error", subject: "hero" });

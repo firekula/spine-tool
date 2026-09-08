@@ -1,0 +1,23 @@
+# Installed dependencies and build output — rebuilt inside the image.
+node_modules
+dist
+dist-offline
+ready-to-run
+*.zip
+
+# Git / editor / tooling state.
+.git
+.gitignore
+.gitattributes
+.worktrees
+.superpowers
+
+# Source tarballs are only used by scripts/verify-runtime-assets.mjs, which the
+# image build does not run. The built runtimes under vendor/spine-runtime-3.x
+# are required and stay in the context.
+vendor/source
+*.tar
+*.tar.gz
+
+# Local image artefacts produced by the packaging steps.
+docker-image

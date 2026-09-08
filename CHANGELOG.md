@@ -6,12 +6,18 @@
 
 ### 修复
 
+- 新增 Region 引用诊断：当 JSON 的 Region/Mesh 附件引用的名称与 Atlas 中的 Region 名只差首尾空格时（Spine Runtime 解析 Atlas 时会裁剪 Region 名，但读取 JSON 附件 `path` 时不裁剪，两者无法精确匹配），工具会在加载任何 Runtime 之前给出中文诊断，指明槽位、附件、JSON 中的 `path`、Atlas 中的 Region 名以及修复方式，不再只显示 Runtime 的英文 `Region not found in atlas` 报错；引用完全不存在的 Region 时也会单独报告（2026-09-08）。新增 `lib/atlas/region-references.ts` 及单元测试；该检查只做诊断，不改写任何骨骼或 Atlas 数据。
 - 修复导入在部分旧版 Chromium 内核中必然失败的问题（2026-09-08）。这些内核缺少 `AbortSignal.prototype.throwIfAborted`，导入流程在解析任何文件之前就会抛出 `o.throwIfAborted is not a function`，界面表现为 `IMPORT_FAILED`、错误对象为所选 `.atlas`。导入改为使用与 `restore-region`、`export-zip` 一致的 `signal.aborted` 本地检查，不再依赖该较新 API；该问题与 Spine 版本无关，修复后 `3.8.75` 等素材可在 Chromium 约 87 及以上的内核中正常识别与导入。
 - 同步重建离线包并更新 `scripts/offline-assets.json` 与 `scripts/offline-runtime-audit.mjs` 中的固定 SHA-256（主 chunk 变化会级联改变引用它的 Runtime chunk 与 `index.html`），`ready-to-run` 内容已与清单逐字节核对。
+
+### 构建
+
+- 新增 `scripts/build-docker-image.mjs` 与 `npm run docker:build` / `npm run docker:package`：用 Node 实现、不依赖 gzip，跨平台构建镜像，支持 `--tag`、`--platform`、`--no-cache`，导出 `.tar.gz` 归档后打印大小与 SHA-256。
 
 ### 文档
 
 - README 补充浏览器兼容性说明与更新记录入口。
+- 新增 Docker 部署：`Dockerfile`（`node:22-alpine` 构建 → `nginx:1.27-alpine` 提供服务）、`docker-compose.yml`、`docker/nginx.conf`、`.dockerignore` 与 [DOCKER.md](DOCKER.md)，并导出 `docker-image/spine-tool-0.1.0.tar.gz`（`linux/amd64`）。nginx 配置包含 SPA 回退、哈希资源长期缓存、gzip、`/healthz` 与安全响应头（含与离线包一致的 CSP）；已用真实 Chrome 验证页面渲染、`blob:` Worker 与 `self` 模块 Worker 可用、无 CSP 违规。
 
 ## 历史
 
