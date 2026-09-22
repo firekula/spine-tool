@@ -10,7 +10,7 @@
 # or create a .env file next to this file containing: SPINE_TOOL_PORT=9000
 services:
   spine-tool:
-    image: spine-tool:0.1.0
+    image: spine-tool:0.1.1
     build:
       context: .
       dockerfile: Dockerfile

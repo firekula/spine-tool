@@ -37,7 +37,7 @@ FROM nginx:1.27-alpine AS runtime
 
 LABEL org.opencontainers.image.title="spine-preview-atlas-exporter" \
       org.opencontainers.image.description="Browser-only Spine animation preview and Atlas region PNG exporter (Spine 3.5-4.3)" \
-      org.opencontainers.image.version="0.1.0" \
+      org.opencontainers.image.version="0.1.1" \
       org.opencontainers.image.licenses="SEE LICENSE IN licenses/"
 
 COPY --from=build /app/dist /usr/share/nginx/html

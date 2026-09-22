@@ -6,14 +6,15 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `docker-image/spine-tool-0.1.0.tar.gz` | 已构建好的镜像归档（压缩后约 21 MB，解压后约 76 MB），可直接上传服务器 |
+| `docker-image/spine-tool-0.1.1.tar.gz` | 已构建好的镜像归档（压缩后约 21 MB，解压后约 76 MB），可直接上传服务器 |
 | `docker-compose.yml` | 单服务编排文件，默认发布到宿主 `8080` 端口 |
 | `Dockerfile` | 多阶段构建：`node:22-alpine` 执行 `npm ci && npm run build`，产物复制到 `nginx:1.27-alpine` |
 | `docker/nginx.conf` | SPA 回退、gzip、静态资源缓存、安全响应头、`/healthz` 健康检查 |
 | `.dockerignore` | 排除 `node_modules`、构建产物、`.git` 与 11 MB 的 `vendor/source` 源码包 |
 
-镜像标签：`spine-tool:0.1.0`，平台 `linux/amd64`。
-随仓库附带归档的 SHA-256：`e72c3cff4e2869ef181efc2a1ebb6294d5ac38df9854d2d8aac5d644cac6e555`。用 `npm run docker:package` 重新构建时，脚本会打印新归档的大小与 SHA-256。
+镜像标签：`spine-tool:0.1.1`，平台 `linux/amd64`。
+随仓库附带归档的 SHA-256：`a1121a89b8354c7f89428212dfdce32207eea41ee0bc9a9caceb740400cce2be`（20.6 MB）。用 `npm run docker:package` 重新构建时，脚本会打印新归档的大小与 SHA-256。
+0.1.1 相对 0.1.0 只改了应用代码：PNG 小于 Atlas 声明尺寸时按官方拆图行为补齐右侧和底部透明像素（详见 [CHANGELOG.md](CHANGELOG.md)）。
 
 ## 手动构建镜像
 
@@ -35,7 +36,7 @@ npm run docker:build -- --npm-registry https://registry.npmmirror.com  # 构建�
 构建的第一阶段会执行 `npm ci`。默认使用官方源 `https://registry.npmjs.org`；网络受限时用上面的 `--npm-registry` 指定镜像源，等价于直接构建时传参：
 
 ```bash
-docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t spine-tool:0.1.0 .
+docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t spine-tool:0.1.1 .
 ```
 
 该参数只影响构建镜像时的依赖下载，运行时镜像里没有 npm，应用也不访问任何 registry。构建产物内容与用哪个源无关。
@@ -46,7 +47,7 @@ docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t spine-to
 在本地（或任意能访问该归档的机器）把镜像和编排文件传到服务器：
 
 ```bash
-scp docker-image/spine-tool-0.1.0.tar.gz user@server:/opt/spine-tool/
+scp docker-image/spine-tool-0.1.1.tar.gz user@server:/opt/spine-tool/
 scp docker-compose.yml user@server:/opt/spine-tool/
 ```
 
@@ -57,9 +58,9 @@ cd /opt/spine-tool
 
 # 1. 校验并导入镜像（docker load 会自动识别 .tar.gz）
 sha256sum -c <<'EOF'
-4a678a66f1b96e5b427babb9f1068f8787b39c24381e5bb5c8fc6c95336379e0  spine-tool-0.1.0.tar.gz
+a1121a89b8354c7f89428212dfdce32207eea41ee0bc9a9caceb740400cce2be  spine-tool-0.1.1.tar.gz
 EOF
-docker load -i spine-tool-0.1.0.tar.gz
+docker load -i spine-tool-0.1.1.tar.gz
 
 # 2. 启动
 docker compose up -d
@@ -114,7 +115,7 @@ docker compose up -d --build
 npm run docker:build
 ```
 
-等价于 `docker build -t spine-tool:0.1.0 .`；用 `npm run docker:package` 可在构建后直接导出归档。
+等价于 `docker build -t spine-tool:0.1.1 .`；用 `npm run docker:package` 可在构建后直接导出归档。
 
 构建阶段会执行 `npm ci` 和 `npm run build`（即 `tsc --noEmit && vite build`），因此需要能下载 npm 依赖。已设置 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`，不会下载 Playwright 浏览器。国内服务器直连官方 npm 源不稳定时，用 `docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com`，或改用 `npm run docker:build -- --npm-registry https://registry.npmmirror.com`。
 
@@ -123,7 +124,7 @@ npm run docker:build
 当前归档是 `linux/amd64`。若服务器是 ARM64（例如 Apple Silicon 或部分云主机），在项目目录执行：
 
 ```bash
-docker buildx build --platform linux/arm64 --provenance=false --sbom=false --load -t spine-tool:0.1.0 .
+docker buildx build --platform linux/arm64 --provenance=false --sbom=false --load -t spine-tool:0.1.1 .
 ```
 
 或使用脚本：`npm run docker:package -- --platform linux/arm64`。
@@ -132,7 +133,7 @@ docker buildx build --platform linux/arm64 --provenance=false --sbom=false --loa
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 --provenance=false --sbom=false \
-  -t <registry>/spine-tool:0.1.0 --push .
+  -t <registry>/spine-tool:0.1.1 --push .
 ```
 
 多架构镜像不能用 `docker save` 导出成单个归档再 `docker load`，请走镜像仓库分发。

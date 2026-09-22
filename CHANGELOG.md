@@ -15,6 +15,7 @@
 
 - 新增 `scripts/build-docker-image.mjs` 与 `npm run docker:build` / `npm run docker:package`：用 Node 实现、不依赖 gzip，跨平台构建镜像，支持 `--tag`、`--platform`、`--no-cache`，导出 `.tar.gz` 归档后打印大小与 SHA-256。
 - `Dockerfile` 新增构建参数 `NPM_REGISTRY`（默认 `https://registry.npmjs.org`），`scripts/build-docker-image.mjs` 新增 `--npm-registry <地址>`（2026-09-22）。构建阶段直连官方源会 `ECONNRESET` 时改用镜像源，只影响 `npm ci` 的下载来源，不影响镜像内容。
+- 镜像版本升到 `spine-tool:0.1.1`（`package.json`、`Dockerfile` 标签、`docker-compose.yml` 同步），并重建 `docker-image/spine-tool-0.1.1.tar.gz`（`linux/amd64`，20.6 MB，SHA-256 `a1121a89b8354c7f89428212dfdce32207eea41ee0bc9a9caceb740400cce2be`）。与 0.1.0 的差异只有上面的透明补齐修复，容器配置、端口和服务方式不变。
 
 ### 文档
 

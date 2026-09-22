@@ -77,10 +77,10 @@ npm run package:offline
 
 ## Docker 部署
 
-仓库提供 `Dockerfile`、`docker-compose.yml` 与已构建的 `docker-image/spine-tool-0.1.0.tar.gz`（`linux/amd64`，压缩后约 21 MB）。镜像基于 `nginx:alpine`，只提供静态站点，默认发布到宿主 `8080` 端口。
+仓库提供 `Dockerfile`、`docker-compose.yml` 与已构建的 `docker-image/spine-tool-0.1.1.tar.gz`（`linux/amd64`，压缩后约 21 MB）。镜像基于 `nginx:alpine`，只提供静态站点，默认发布到宿主 `8080` 端口。
 
 ```bash
-docker load -i docker-image/spine-tool-0.1.0.tar.gz
+docker load -i docker-image/spine-tool-0.1.1.tar.gz
 docker compose up -d          # 打开 http://<服务器地址>:8080
 ```
 
