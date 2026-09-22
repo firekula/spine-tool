@@ -259,6 +259,52 @@ describe("import workflow resources", () => {
     })).rejects.toMatchObject({ code: "REGION_OUT_OF_BOUNDS" });
   });
 
+  it("PNG 小于声明的页面尺寸时把页面扩到声明尺寸，让右侧和底部按透明补齐", async () => {
+    const source = bundle();
+    source.textureFiles = new Map([
+      ["page.png", new File([pngHeader(4, 4)], "page.png", { type: "image/png" })],
+    ]);
+    source.atlasText = [
+      "page.png",
+      "size: 6,6",
+      "",
+      "region",
+      "bounds: 1,1,5,5",
+      "offsets: 0,0,6,6",
+    ].join("\n");
+
+    const result = await prepareImport(source, {
+      decodeTexture: async () => ({ width: 4, height: 4, close: vi.fn() }) as unknown as ImageBitmap,
+    });
+
+    expect(result.exportResources.atlas.pages[0]).toMatchObject({
+      width: 6,
+      height: 6,
+      imageWidth: 4,
+      imageHeight: 4,
+    });
+    result.exportResources.release();
+  });
+
+  it("Region 超出 Atlas 声明尺寸时仍然受控拒绝", async () => {
+    const source = bundle();
+    source.textureFiles = new Map([
+      ["page.png", new File([pngHeader(4, 4)], "page.png", { type: "image/png" })],
+    ]);
+    source.atlasText = [
+      "page.png",
+      "size: 6,6",
+      "",
+      "region",
+      "bounds: 1,1,6,5",
+      "offsets: 0,0,6,5",
+    ].join("\n");
+
+    await expect(prepareImport(source, {
+      decodeTexture: async () => ({ width: 4, height: 4, close: vi.fn() }) as unknown as ImageBitmap,
+    })).rejects.toMatchObject({ code: "REGION_OUT_OF_BOUNDS" });
+  });
+
   it("PNG 解码半途失败时关闭已经创建的 ImageBitmap", async () => {
     const first = { width: 1, height: 1, close: vi.fn() } as unknown as ImageBitmap;
     let calls = 0;

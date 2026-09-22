@@ -6,7 +6,110 @@ const MAGENTA = [255, 0, 255, 255];
 const CYAN = [0, 255, 255, 255];
 const BLUE = [0, 0, 255, 255];
 const YELLOW = [255, 255, 0, 255];
+const PURPLE = [128, 0, 128, 255];
+const BLACK = [0, 0, 0, 255];
 const TRANSPARENT = [0, 0, 0, 0];
+
+for (const paddingCase of [
+  {
+    // Rows 0 and 1 of this crop end inside the PNG, row 2 and columns 3-4 fall
+    // outside it. Without an image bounds check the offset of column 3 of row 0
+    // wraps into row 1 and would report MAGENTA/CYAN instead of nothing.
+    title: "PNG 右侧和底部缺少的像素按透明补齐，不回绕到相邻行像素",
+    textureWidth: 3,
+    textureHeight: 2,
+    texturePixels: [RED, GREEN, BLUE, MAGENTA, CYAN, YELLOW],
+    region: { x: 2, y: 0, packedWidth: 3, packedHeight: 3, rotation: 0 },
+    sourceSize: { width: 5, height: 4 },
+    expectedWidth: 3,
+    expectedHeight: 3,
+    expectedPixels: [
+      BLUE, TRANSPARENT, TRANSPARENT,
+      YELLOW, TRANSPARENT, TRANSPARENT,
+      TRANSPARENT, TRANSPARENT, TRANSPARENT,
+    ],
+  },
+  {
+    // 90° packing maps original x = 0 onto the PNG row below its last one, so
+    // the first output column has to come out fully transparent.
+    title: "旋转 Region 落在 PNG 底部之外的像素同样按透明补齐",
+    textureWidth: 3,
+    textureHeight: 3,
+    texturePixels: [RED, GREEN, BLUE, MAGENTA, CYAN, YELLOW, PURPLE, BLACK, [255, 255, 255, 255]],
+    region: { x: 1, y: 1, packedWidth: 2, packedHeight: 3, rotation: 90 },
+    sourceSize: { width: 4, height: 4 },
+    expectedWidth: 3,
+    expectedHeight: 2,
+    expectedPixels: [
+      TRANSPARENT, BLACK, CYAN,
+      TRANSPARENT, [255, 255, 255, 255], YELLOW,
+    ],
+  },
+] as const) {
+  test(paddingCase.title, async ({ page }) => {
+    await page.goto("/");
+
+    const result = await page.evaluate(async (fixture) => {
+      const modulePath = "/lib/atlas/restore-region.ts";
+      const { restoreRegion } = await import(modulePath);
+      const texture = document.createElement("canvas");
+      texture.width = fixture.textureWidth;
+      texture.height = fixture.textureHeight;
+      const textureContext = texture.getContext("2d");
+      if (!textureContext) throw new Error("缺少测试 Canvas 2D context");
+      textureContext.putImageData(
+        new ImageData(new Uint8ClampedArray(fixture.texturePixels.flat()), fixture.textureWidth, fixture.textureHeight),
+        0,
+        0,
+      );
+      const sourcePng = await new Promise<Blob>((resolve, reject) => {
+        texture.toBlob((blob) => blob ? resolve(blob) : reject(new Error("测试 PNG 编码失败")), "image/png");
+      });
+      const texturePage = await createImageBitmap(sourcePng);
+      const rotation: number = fixture.region.rotation;
+      const swappedAxes = rotation === 90 || rotation === 270;
+      const unrotatedWidth = swappedAxes ? fixture.region.packedHeight : fixture.region.packedWidth;
+      const unrotatedHeight = swappedAxes ? fixture.region.packedWidth : fixture.region.packedHeight;
+
+      const restored = await restoreRegion({
+        region: {
+          name: "padded",
+          pageName: "padded.png",
+          index: -1,
+          ...fixture.region,
+          originalWidth: unrotatedWidth,
+          originalHeight: unrotatedHeight,
+          offsetLeft: 0,
+          offsetBottom: 0,
+          custom: {},
+        },
+        texturePage,
+        restoreMultiplier: 1,
+        sourceSize: fixture.sourceSize,
+      });
+      texturePage.close();
+
+      const restoredBitmap = await createImageBitmap(restored.blob);
+      const output = document.createElement("canvas");
+      output.width = restoredBitmap.width;
+      output.height = restoredBitmap.height;
+      const outputContext = output.getContext("2d");
+      if (!outputContext) throw new Error("缺少输出 Canvas 2D context");
+      outputContext.drawImage(restoredBitmap, 0, 0);
+      restoredBitmap.close();
+
+      return {
+        width: output.width,
+        height: output.height,
+        pixels: [...outputContext.getImageData(0, 0, output.width, output.height).data],
+      };
+    }, paddingCase);
+
+    expect(result.width).toBe(paddingCase.expectedWidth);
+    expect(result.height).toBe(paddingCase.expectedHeight);
+    expect(result.pixels).toEqual(paddingCase.expectedPixels.flat());
+  });
+}
 
 const cases = [
   {

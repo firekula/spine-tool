@@ -149,8 +149,13 @@ const ISSUE_MESSAGES: Record<string, IssueMessage> = {
   },
   REGION_OUT_OF_BOUNDS: {
     title: "Region 超出纹理范围",
-    reason: "Region 的裁切矩形落在所属 PNG 纹理页之外。",
+    reason: "Region 的裁切矩形既超出 PNG 纹理页，也超出 Atlas 为该页声明的尺寸。",
     action: "请检查 Atlas 与 PNG 是否来自同一次导出，修正后重新导入；工具会在任何 Region 恢复与导出前停止。",
+  },
+  TEXTURE_PAGE_PADDED: {
+    title: "PNG 小于 Atlas 声明尺寸",
+    reason: "PNG 的右侧或底部比 Atlas 声明的纹理页尺寸少了若干像素。按官方拆图行为，这些像素按完全透明补齐后再提取 Region。",
+    action: "可以继续预览与导出；若补齐的区域本应包含内容，请重新导出该 PNG，或确认它与当前 Atlas 来自同一次导出。",
   },
   MISSING_TEXTURE_PAGE: {
     title: "Region 缺少纹理页",

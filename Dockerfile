@@ -15,7 +15,12 @@ COPY package.json package-lock.json ./
 # Browsers are only needed by the Playwright test suite, not by the build.
 # Skipping the download keeps `npm ci` fast and offline-friendly.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN npm ci
+
+# Registry for the build-time install only. Keep the default on networks that
+# reach registry.npmjs.org, or point it at a mirror, for example:
+#   docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t spine-tool .
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN npm ci --registry="$NPM_REGISTRY"
 
 # Sources, configs, vendored runtimes and licenses.
 COPY . .

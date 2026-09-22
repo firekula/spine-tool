@@ -6,6 +6,13 @@ export interface RestoreRegionInput {
   region: AtlasRegion;
   texturePage: ImageBitmap;
   restoreMultiplier: number;
+  /**
+   * Pixel box the Region may read: the decoded PNG widened to the Atlas page
+   * size. Pixels only the declared box covers are transparent, matching an
+   * official export of a PNG whose right/bottom area was trimmed away. Defaults
+   * to the decoded texture size.
+   */
+  sourceSize?: PixelSize;
   /** Pixel storage mode of the source Atlas page. PNG output is always straight alpha. */
   sourceAlphaMode?: TextureAlphaMode;
   /** Batch-scoped raw texture-page cache. The caller owns it and must clear it after the batch. */
@@ -177,7 +184,13 @@ function sourceOffsetForOriginalPixel(
     packedX = plan.crop.width - 1 - y;
     packedY = x;
   }
-  return ((plan.crop.y + packedY) * source.width + plan.crop.x + packedX) * 4;
+  const pixelX = plan.crop.x + packedX;
+  const pixelY = plan.crop.y + packedY;
+  // Pixels the declared page box adds beyond the decoded PNG are transparent.
+  // Returning -1 here keeps them out of both the direct and the resampled path,
+  // instead of letting the offset wrap into the next stored row.
+  if (pixelX < 0 || pixelY < 0 || pixelX >= source.width || pixelY >= source.height) return -1;
+  return (pixelY * source.width + pixelX) * 4;
 }
 
 function straightChannel(value: number, alpha: number, mode: TextureAlphaMode): number {
@@ -359,12 +372,13 @@ export async function restoreRegion(input: RestoreRegionInput): Promise<Restored
     region,
     texturePage,
     restoreMultiplier,
+    sourceSize,
     sourceAlphaMode = "straight",
     texturePixelCache,
     signal,
   } = input;
   throwIfAborted(signal);
-  const plan = planRegionRestore(region, restoreMultiplier, {
+  const plan = planRegionRestore(region, restoreMultiplier, sourceSize ?? {
     width: texturePage.width,
     height: texturePage.height,
   });

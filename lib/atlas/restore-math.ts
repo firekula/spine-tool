@@ -58,7 +58,8 @@ function assertSafeRasterSize(region: AtlasRegion, label: string, size: PixelSiz
 export function planRegionRestore(
   region: AtlasRegion,
   restoreMultiplier: number,
-  textureSize?: PixelSize,
+  /** Pixel box the region may read: the decoded PNG widened to the Atlas page size. */
+  sourceSize?: PixelSize,
 ): RegionRestorePlan {
   if (!positiveFinite(restoreMultiplier)) fail(region, "的恢复倍率必须是大于 0 的有限数值");
 
@@ -76,16 +77,19 @@ export function planRegionRestore(
     fail(region, "的原始画布尺寸或透明边距无效");
   }
 
-  if (textureSize) {
-    if (!positiveFinite(textureSize.width) || !positiveFinite(textureSize.height)) {
+  if (sourceSize) {
+    if (!positiveFinite(sourceSize.width) || !positiveFinite(sourceSize.height)) {
       fail(region, "所属纹理页的尺寸无效");
     }
-    const outsideTexture = region.x + region.packedWidth > textureSize.width
-      || region.y + region.packedHeight > textureSize.height;
-    if (outsideTexture) {
+    // The box is the union of the decoded PNG and the declared page size, so a
+    // Region that reaches into the transparent area a truncated PNG is missing
+    // still plans normally. Only a crop outside both is a real mismatch.
+    const outsideSource = region.x + region.packedWidth > sourceSize.width
+      || region.y + region.packedHeight > sourceSize.height;
+    if (outsideSource) {
       fail(
         region,
-        `的裁切范围超出纹理页 ${region.pageName}（${textureSize.width}×${textureSize.height}）`,
+        `的裁切范围超出纹理页 ${region.pageName}（${sourceSize.width}×${sourceSize.height}）`,
       );
     }
   }

@@ -1,4 +1,5 @@
 import { parseAtlas } from "@/lib/atlas/parse-atlas";
+import { unionPageSize } from "@/lib/atlas/page-padding";
 import { findRegionReferenceProblems, type RegionReferenceProblem } from "@/lib/atlas/region-references";
 import type { AtlasDocument } from "@/lib/atlas/types";
 import type { ImportBundle } from "@/lib/files/import-files";
@@ -199,13 +200,30 @@ function assertRegionReferences(atlasText: string, skeletonText: string): void {
   if (problems.length > 0) throw regionReferenceError(problems);
 }
 
-function resolveDecodedPageDimensions(atlas: AtlasDocument, textures: ReadonlyMap<string, ImageBitmap>): void {
+/**
+ * Records the decoded PNG size on every Atlas page and widens each page box to
+ * the size the Atlas declares for it.
+ *
+ * A PNG whose right or bottom transparent pixels were trimmed away after export
+ * is still described by the Atlas' own `xy`/`size` values, so the page box is the
+ * union of both. Reading that box and treating only the decoded PNG's pixels as
+ * data restores complete Regions, while a crop outside the union still means the
+ * Atlas and the PNG do not belong together and stays a hard error.
+ */
+function applyDecodedPageDimensions(
+  atlas: AtlasDocument,
+  textures: ReadonlyMap<string, ImageBitmap>,
+): void {
   const pages = new Map(atlas.pages.map((page) => [page.name, page]));
   for (const page of atlas.pages) {
     const texture = textures.get(page.name);
     if (!texture) continue;
-    page.width = texture.width;
-    page.height = texture.height;
+    const image = { width: texture.width, height: texture.height };
+    const box = unionPageSize(image, page);
+    page.imageWidth = image.width;
+    page.imageHeight = image.height;
+    page.width = box.width;
+    page.height = box.height;
   }
   for (const region of atlas.regions) {
     const page = pages.get(region.pageName);
@@ -340,7 +358,7 @@ export async function prepareImport(
         );
       }
     }
-    resolveDecodedPageDimensions(atlas, textures);
+    applyDecodedPageDimensions(atlas, textures);
     throwIfAborted(signal);
   } catch (error) {
     for (const texture of textures.values()) texture.close();

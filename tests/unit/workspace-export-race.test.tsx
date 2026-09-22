@@ -193,7 +193,7 @@ describe("workspace export/import race", () => {
     const center = await screen.findByRole("region", { name: "问题中心" });
     await waitFor(() => expect(center.textContent).toContain("Region 超出纹理范围"));
     expect(center.textContent).toContain("对象Region「region-0」");
-    expect(center.textContent).toContain("裁切矩形落在所属 PNG 纹理页之外");
+    expect(center.textContent).toContain("裁切矩形既超出 PNG 纹理页，也超出 Atlas 为该页声明的尺寸");
     expect(center.textContent).toContain("请检查 Atlas 与 PNG 是否来自同一次导出");
     expect(screen.getByText(/导出完成：成功 0 项，跳过 0 项，失败 1 项/)).toBeTruthy();
   });

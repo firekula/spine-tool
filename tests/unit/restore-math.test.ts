@@ -68,6 +68,16 @@ describe("planRegionRestore", () => {
       .toThrow("Region「hero」的裁切范围超出纹理页 page.png（50×50）");
   });
 
+  it("接受落在声明页面框内、但超出 PNG 解码尺寸的裁切矩形", () => {
+    const plan = planRegionRestore(region({ x: 45, y: 45, packedWidth: 10, packedHeight: 10 }), 1, {
+      width: 56,
+      height: 56,
+    });
+
+    expect(plan.crop).toEqual({ x: 45, y: 45, width: 10, height: 10 });
+    expect(plan.output).toEqual({ width: 30, height: 40 });
+  });
+
   it("拒绝有效像素超出声明的原始透明画布", () => {
     expect(() => planRegionRestore(region({ offsetLeft: 15 }), 1))
       .toThrow("Region「hero」的有效像素范围超出原始画布");

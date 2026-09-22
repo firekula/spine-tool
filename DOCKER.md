@@ -25,9 +25,20 @@ npm run docker:package                            # 构建并导出 docker-image
 npm run docker:package -- --platform linux/arm64  # 指定目标平台
 npm run docker:package -- --tag spine-tool:0.2.0  # 指定标签
 npm run docker:build -- --no-cache                # 忽略构建缓存
+npm run docker:build -- --npm-registry https://registry.npmmirror.com  # 构建阶段走国内镜像
 ```
 
 也可直接运行 `node scripts/build-docker-image.mjs --help` 查看全部参数。脚本默认关闭 BuildKit provenance/SBOM，以得到可用 `docker save` 单清单导出的镜像；需要保留证明时加 `--with-provenance`。导出结束后会打印归档路径、大小和 SHA-256。
+
+### 构建阶段的 npm registry
+
+构建的第一阶段会执行 `npm ci`。默认使用官方源 `https://registry.npmjs.org`；网络受限时用上面的 `--npm-registry` 指定镜像源，等价于直接构建时传参：
+
+```bash
+docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com -t spine-tool:0.1.0 .
+```
+
+该参数只影响构建镜像时的依赖下载，运行时镜像里没有 npm，应用也不访问任何 registry。构建产物内容与用哪个源无关。
 
 
 ## 方式一：上传镜像并部署（推荐）
@@ -105,7 +116,7 @@ npm run docker:build
 
 等价于 `docker build -t spine-tool:0.1.0 .`；用 `npm run docker:package` 可在构建后直接导出归档。
 
-构建阶段会执行 `npm ci` 和 `npm run build`（即 `tsc --noEmit && vite build`），因此需要能下载 npm 依赖。已设置 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`，不会下载 Playwright 浏览器。
+构建阶段会执行 `npm ci` 和 `npm run build`（即 `tsc --noEmit && vite build`），因此需要能下载 npm 依赖。已设置 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`，不会下载 Playwright 浏览器。国内服务器直连官方 npm 源不稳定时，用 `docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com`，或改用 `npm run docker:build -- --npm-registry https://registry.npmmirror.com`。
 
 ## 其他平台架构
 

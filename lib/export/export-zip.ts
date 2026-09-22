@@ -1,11 +1,12 @@
 import { normalizeAtlasPageMap, normalizeAtlasPageName } from "@/lib/atlas/page-name";
+import { unionPageSize } from "@/lib/atlas/page-padding";
 import {
   assertTextureReadBudget,
   restoreRegion,
   type TexturePixelCache,
 } from "@/lib/atlas/restore-region";
-import { planRegionRestore } from "@/lib/atlas/restore-math";
-import type { AtlasDocument, AtlasRegion } from "@/lib/atlas/types";
+import { planRegionRestore, type PixelSize } from "@/lib/atlas/restore-math";
+import type { AtlasDocument, AtlasPage, AtlasRegion } from "@/lib/atlas/types";
 import { MAX_ATLAS_REGION_COUNT } from "@/lib/atlas/limits";
 import type { ScaleEvidence, ScaleInference } from "@/lib/spine/scale-inference";
 import { createZipPathAllocator } from "@/lib/export/safe-path";
@@ -45,6 +46,12 @@ export interface ExportRegionReport {
   };
   originalSize: { width: number; height: number };
   transparentPadding: { left: number; bottom: number; right: number; top: number };
+  /**
+   * Transparent columns and rows the Atlas page box adds beyond the decoded PNG
+   * and this Region's packed rectangle reaches into. Absent when the PNG covers
+   * the whole packed rectangle.
+   */
+  sourcePadding?: { right: number; bottom: number };
   automaticMultiplier: number;
   globalMultiplier: number;
   userOverrideMultiplier: number | null;
@@ -222,7 +229,31 @@ function sanitizedScaleInference(input: ScaleInference): ScaleInference {
 
 type ExportAlpha = ExportRegionReport["alpha"];
 
-function alphaForPage(input: ExportAllInput, pageName: string): ExportAlpha {
+function findPage(input: ExportAllInput, pageName: string): AtlasPage | undefined {
+  return input.atlas.pages.find((candidate) => normalizeAtlasPageName(candidate.name) === pageName);
+}
+
+/**
+ * Pixel box the export reads a Region from: the decoded PNG widened to the page
+ * size the Atlas declares, so a PNG trimmed at the right/bottom still restores
+ * complete Regions with transparent padding instead of failing.
+ */
+function sourcePageSize(texture: ImageBitmap, page: AtlasPage | undefined): PixelSize {
+  return unionPageSize(
+    { width: texture.width, height: texture.height },
+    page ? { width: page.width, height: page.height } : null,
+  );
+}
+
+function sourcePaddingFor(region: AtlasRegion, page: AtlasPage | undefined): { right: number; bottom: number } | null {
+  const { imageWidth, imageHeight } = page ?? {};
+  if (typeof imageWidth !== "number" || typeof imageHeight !== "number") return null;
+  const right = Math.max(0, region.x + region.packedWidth - imageWidth);
+  const bottom = Math.max(0, region.y + region.packedHeight - imageHeight);
+  return right > 0 || bottom > 0 ? { right, bottom } : null;
+}
+
+function alphaForPage(input: ExportAllInput, page: AtlasPage | undefined): ExportAlpha {
   const legacy = input.sourceVersion?.startsWith("3.") ?? false;
   if (legacy) {
     if (!input.legacyAlphaMode) {
@@ -234,7 +265,6 @@ function alphaForPage(input: ExportAllInput, pageName: string): ExportAlpha {
       conversion: input.legacyAlphaMode === "premultiplied" ? "pma-to-straight" : "none",
     };
   }
-  const page = input.atlas.pages.find((candidate) => normalizeAtlasPageName(candidate.name) === pageName);
   if (page?.pma !== undefined) {
     return {
       source: "atlas-page-pma",
@@ -252,7 +282,9 @@ function baseReport(
   evidenceIndex: EvidenceIndex,
 ): ExportRegionReport {
   const pageName = normalizeAtlasPageName(region.pageName);
-  const alpha = alphaForPage(input, pageName);
+  const page = findPage(input, pageName);
+  const alpha = alphaForPage(input, page);
+  const sourcePadding = sourcePaddingFor(region, page);
   const unrotatedWidth = region.rotation === 90 || region.rotation === 270
     ? region.packedHeight
     : region.packedWidth;
@@ -276,6 +308,7 @@ function baseReport(
       right: region.originalWidth - region.offsetLeft - unrotatedWidth,
       top: region.originalHeight - region.offsetBottom - unrotatedHeight,
     },
+    ...(sourcePadding ? { sourcePadding } : {}),
     automaticMultiplier: input.inferredScale.restoreMultiplier,
     globalMultiplier: input.globalMultiplier,
     userOverrideMultiplier: override,
@@ -337,7 +370,7 @@ export async function exportAllRegions(
     if (!isPositiveFinite(finalMultiplier)) continue;
     let plan;
     try {
-      plan = planRegionRestore(region, finalMultiplier, texture);
+      plan = planRegionRestore(region, finalMultiplier, sourcePageSize(texture, findPage(input, region.pageName)));
     } catch {
       // Invalid and individually oversized Regions are reported per item by
       // restoreRegion; only otherwise-valid outputs contribute to batch cost.
@@ -387,6 +420,7 @@ export async function exportAllRegions(
           region,
           texturePage: texture,
           restoreMultiplier: finalMultiplier,
+          sourceSize: sourcePageSize(texture, findPage(input, region.pageName)),
           sourceAlphaMode: report.alpha.inputMode,
           texturePixelCache,
           signal: options.signal,

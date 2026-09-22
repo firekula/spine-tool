@@ -120,6 +120,68 @@ test("多页 Atlas 省略 size 或写 0,0 时用 PNG 实际尺寸完成 Atlas-on
   expect(errors).toEqual([]);
 });
 
+test("PNG 比 Atlas 声明尺寸小时按声明尺寸补齐右侧和底部透明像素后导出", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.goto("/");
+  await importFixture(page, {
+    atlas: pageWithRegion({
+      pageName: "trimmed.png",
+      pageSize: "6,6",
+      regionName: "padded",
+      bounds: "1,1,5,5",
+      offsets: "0,0,6,6",
+    }),
+    skeleton: JSON.stringify({
+      skeleton: { hash: "padding-e2e", spine: "4.3.0", width: 6, height: 6 },
+      bones: [{ name: "root" }],
+      slots: [{ name: "body", bone: "root", attachment: "padded" }],
+      skins: [{
+        name: "default",
+        attachments: { body: { padded: { type: "region", path: "padded", width: 6, height: 6 } } },
+      }],
+      animations: { idle: {} },
+    }),
+    pngNames: ["trimmed.png"],
+    pngBuffers: { "trimmed.png": makePng(4, 4, [200, 20, 30, 255]) },
+  });
+
+  const center = page.getByRole("region", { name: "问题中心" });
+  await expect(center).toContainText("PNG 小于 Atlas 声明尺寸");
+  await expect(center).toContainText("纹理页「trimmed.png」实际 4×4，Atlas 声明 6×6");
+  await expect(center).toContainText("已按声明尺寸在右侧 2 px、底部 2 px 补齐透明像素，涉及 1 个 Region（padded）");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: /导出全部 ZIP/ }).click();
+  const download = await downloadPromise;
+  const path = await download.path();
+  if (!path) throw new Error("浏览器没有提供下载文件路径");
+  const zip = await JSZip.loadAsync(await readFile(path));
+  const paddedBytes = Buffer.from(await zip.file("padded.png")!.async("uint8array"));
+
+  expect(pngSize(paddedBytes)).toEqual({ width: 6, height: 6 });
+  const decoded = await decodePng(page, paddedBytes);
+  const pixelAt = (x: number, y: number): number[] => decoded.rgba.slice((y * 6 + x) * 4, (y * 6 + x) * 4 + 4);
+  // Row 0 and column 5 are the Region's own top/right trim margin; the 4x4 PNG
+  // covers source (1,1)-(3,3) of the packer's 6x6 box, so columns 4-5 and rows
+  // 4-5 of the crop come out transparent.
+  expect(pixelAt(0, 1)).toEqual([200, 20, 30, 255]);
+  expect(pixelAt(2, 3)).toEqual([200, 20, 30, 255]);
+  expect(pixelAt(3, 1)).toEqual([0, 0, 0, 0]);
+  expect(pixelAt(0, 4)).toEqual([0, 0, 0, 0]);
+  expect(pixelAt(0, 0)).toEqual([0, 0, 0, 0]);
+  expect(pixelAt(5, 5)).toEqual([0, 0, 0, 0]);
+
+  const report = JSON.parse(await zip.file("export-report.json")!.async("string"));
+  expect(report.summary).toEqual({ successful: 1, skipped: 0, failed: 0, total: 1 });
+  expect(report.regions[0]).toMatchObject({
+    regionName: "padded",
+    status: "success",
+    outputSize: { width: 6, height: 6 },
+    sourcePadding: { right: 2, bottom: 2 },
+  });
+  expect(errors).toEqual([]);
+});
+
 test("多页 Atlas 任一 Region 越过 PNG 实际尺寸时在恢复和下载前受控拒绝", async ({ page }) => {
   const errors = collectPageErrors(page);
   let downloads = 0;

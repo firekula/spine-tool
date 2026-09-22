@@ -26,6 +26,8 @@ const HELP = `构建 Spine 工具 Docker 镜像。
 选项：
   --tag <名称:标签>     镜像标签，默认 spine-tool:<package.json 版本>
   --platform <平台>     目标平台，例如 linux/amd64、linux/arm64；默认使用本机平台
+  --npm-registry <地址> 构建阶段 npm ci 使用的 registry，默认官方源；国内可用
+                        https://registry.npmmirror.com
   --save                构建后导出 gzip 压缩的镜像归档，并打印 SHA-256
   --output <目录>       归档输出目录，默认 docker-image（相对项目根目录）
   --no-cache            忽略构建缓存
@@ -42,6 +44,7 @@ function parseArguments(argv) {
   const options = {
     tag: undefined,
     platform: undefined,
+    npmRegistry: undefined,
     save: false,
     output: "docker-image",
     noCache: false,
@@ -51,6 +54,7 @@ function parseArguments(argv) {
     const argument = argv[index];
     if (argument === "--tag") options.tag = argv[++index];
     else if (argument === "--platform") options.platform = argv[++index];
+    else if (argument === "--npm-registry") options.npmRegistry = argv[++index];
     else if (argument === "--output") options.output = argv[++index];
     else if (argument === "--save") options.save = true;
     else if (argument === "--no-cache") options.noCache = true;
@@ -62,7 +66,7 @@ function parseArguments(argv) {
       fail(`未知参数 ${argument}；使用 --help 查看用法。`);
     }
   }
-  for (const key of ["tag", "platform", "output"]) {
+  for (const key of ["tag", "platform", "output", "npmRegistry"]) {
     if (options[key] !== undefined && !options[key]) fail(`--${key} 需要非空值。`);
   }
   return options;
@@ -113,6 +117,7 @@ const buildArgs = useBuildx ? ["buildx", "build", "--load"] : ["build"];
 buildArgs.push("-t", tag);
 if (useBuildx && !options.provenance) buildArgs.push("--provenance=false", "--sbom=false");
 if (options.platform) buildArgs.push("--platform", options.platform);
+if (options.npmRegistry) buildArgs.push("--build-arg", `NPM_REGISTRY=${options.npmRegistry}`);
 if (options.noCache) buildArgs.push("--no-cache");
 buildArgs.push(".");
 

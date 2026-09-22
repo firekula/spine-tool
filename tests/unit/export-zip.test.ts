@@ -496,6 +496,43 @@ describe("exportAllRegions", () => {
     expect(result.report.regions[0]).toMatchObject({ sourceTexturePage: "page.png", status: "success" });
   });
 
+  it("把补齐后的页面框交给恢复层，并在报告中记录该 Region 用到的透明补齐量", async () => {
+    mocks.restoreRegion.mockReset();
+    mocks.restoreRegion.mockResolvedValue({
+      blob: new Blob(["png"], { type: "image/png" }), width: 20, height: 24, plan: {},
+    });
+    const paddedAtlas: AtlasDocument = {
+      pages: [{ name: "page.png", width: 66, height: 68, imageWidth: 64, imageHeight: 65, custom: {} }],
+      regions: [
+        { ...atlas.regions[0]!, name: "edge", index: 0, x: 56, y: 56, packedWidth: 10, packedHeight: 12 },
+        { ...atlas.regions[0]!, name: "inside", index: 1, x: 0, y: 0, packedWidth: 10, packedHeight: 12 },
+      ],
+    };
+
+    const result = await exportAllRegions({
+      atlas: paddedAtlas,
+      textures: new Map([["page.png", { width: 64, height: 65 } as ImageBitmap]]),
+      inferredScale: { ...inferredScale, restoreMultiplier: 1 },
+      globalMultiplier: 1,
+      regionOverrides: new Map(),
+      sourceVersion: "4.2",
+    }, vi.fn());
+
+    expect(mocks.restoreRegion).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      sourceSize: { width: 66, height: 68 },
+    }));
+    expect(mocks.restoreRegion).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      sourceSize: { width: 66, height: 68 },
+    }));
+    expect(result.report.regions[0]).toMatchObject({
+      regionName: "edge",
+      status: "success",
+      sourcePadding: { right: 2, bottom: 3 },
+    });
+    expect(result.report.regions[1]).toMatchObject({ regionName: "inside", status: "success" });
+    expect(result.report.regions[1]).not.toHaveProperty("sourcePadding");
+  });
+
   it("取消后不再恢复下一项，也不返回残缺 ZIP", async () => {
     mocks.restoreRegion.mockReset();
     mocks.restoreRegion.mockResolvedValue({

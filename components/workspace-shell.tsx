@@ -16,6 +16,7 @@ import { PreviewCanvas } from "@/components/preview-canvas";
 import { SkinPanel } from "@/components/skin-panel";
 import { SlotPanel } from "@/components/slot-panel";
 import { StatusCenter } from "@/components/status-center";
+import { collectPagePaddings, describePagePadding } from "@/lib/atlas/page-padding";
 import type { ImportBundle } from "@/lib/files/import-files";
 import {
   createRuntimeSession,
@@ -386,6 +387,20 @@ export function WorkspaceShell({ bridge: suppliedBridge, metadata: suppliedMetad
       }
       replacePrepared(nextPrepared);
       setAlphaMode(suggestLegacyAlphaMode(bundle));
+
+      const pagePaddings = collectPagePaddings(nextPrepared.exportResources.atlas);
+      if (pagePaddings.length > 0) {
+        dispatch({
+          type: "REPORT_ISSUE",
+          issue: {
+            code: "TEXTURE_PAGE_PADDED",
+            severity: "warning",
+            subject: pagePaddings.map((padding) => padding.pageName).join("、"),
+            details: pagePaddings.map(describePagePadding),
+          },
+        });
+      }
+
       dispatch({
         type: "IMPORT_VERSION_IDENTIFIED",
         rawVersion: nextPrepared.detected.raw,
